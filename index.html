@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<!--
+================================================================================
+ 千一体目の観音さま(仮) - 三十三間堂 協力ゲーム プロトタイプ
+================================================================================
+
+■ 起動方法
+  1. このファイル(index.html)があるフォルダで、ローカルサーバーを起動します。
+       例: python3 -m http.server 8000
+       例: npx serve .
+  2. Chrome で http://localhost:8000 を開きます。
+  3. 「カメラではじめる」を選ぶとWebカメラの使用許可を求められるので許可してください。
+
+  ※ 注意: カメラ機能(getUserMedia)は「安全なコンテキスト」でのみ動作します。
+     file:// で直接開くとカメラが使えないブラウザがあるため、
+     必ず http://localhost 経由で開いてください。
+     (キーボードモードのみ確認する場合は file:// でも動作します)
+
+■ カメラ検出の精度に影響する環境要因(展示前に必ず確認)
+  - 照明: 明るく均一な照明が理想。逆光・強い西日・色付き照明(暖色電球のみ等)は
+    色相がずれて検出が不安定になります。白色光を推奨。
+  - シールの色: 左=ピンク系 / 右=グリーン系。彩度の高い(蛍光色に近い)シールほど
+    背景と分離しやすく安定します。1枚あたり3cm角以上を推奨。
+  - 背景: カメラに映る背景に、シールと同系色(ピンク・緑)の物や服があると誤検出します。
+    プレイヤーの服・壁・ポスター等を事前に確認してください。
+  - 距離: カメラから台紙まで 50cm〜1m 程度。近すぎるとシールが画面外に出やすく、
+    遠すぎると検出画素数が足りずロストしやすくなります。
+  - 照明が変わったら: フェーズ3冒頭のキャリブレーション画面で色を登録し直し、
+    「色の許容しきい値」スライダーで調整してください。
+
+■ 差し替えポイント
+  - 画像: スクリプト冒頭の IMAGE_PATHS にパスを設定すると、プレースホルダーの
+    代わりに画像が表示されます(後白河上皇の立ち絵 / お堂の背景 / 中尊)。
+  - BGM・効果音: 同じく BGM_PATHS / SE_PATHS にパスを設定すると各場面で再生されます。
+  - カメラ検出パラメータ: DETECT 定数(スキャン間引き・しきい値・スムージング)。
+
+================================================================================
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>千一体目の観音さま(仮)</title>
+<style>
+  /* ============ 全体の色調: 薄暗いお堂に灯りがともる雰囲気 ============ */
+  :root {
+    --ink: #14100c;        /* 墨 */
+    --wood: #3a2a1c;       /* 木 */
+    --wood-light: #5a4530; /* 明るい木 */
+    --crimson: #7a1f1f;    /* 深紅 */
+    --gold: #d9b45b;       /* 金 */
+    --gold-dim: #8a7440;   /* くすんだ金 */
+    --paper: #f0e6d2;      /* 和紙 */
+    --shadow: rgba(0,0,0,.55);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(ellipse at 50% 30%, #2a2018 0%, var(--ink) 70%);
+    color: var(--paper);
+    font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  #app {
+    position: relative;
+    width: 960px; height: 600px;
+    max-width: 100vw; max-height: 100vh;
+    background: linear-gradient(180deg, #221a12 0%, #171209 100%);
+    box-shadow: 0 0 60px rgba(0,0,0,.8), inset 0 0 120px rgba(0,0,0,.5);
+    border: 1px solid var(--gold-dim);
+    overflow: hidden;
+  }
+  .screen { position: absolute; inset: 0; display: none; }
+  .screen.active { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+
+  h1, h2 { font-weight: 600; letter-spacing: .15em; }
+  .btn {
+    font-family: inherit;
+    background: linear-gradient(180deg, var(--crimson), #571414);
+    color: var(--paper);
+    border: 1px solid var(--gold-dim);
+    padding: 12px 36px; font-size: 18px; letter-spacing: .2em;
+    cursor: pointer; border-radius: 4px;
+    transition: filter .15s, transform .15s;
+  }
+  .btn:hover:not(:disabled) { filter: brightness(1.25); transform: translateY(-1px); }
+  .btn:disabled { opacity: .35; cursor: default; }
+  .btn.sub { background: linear-gradient(180deg, var(--wood-light), var(--wood)); font-size: 15px; padding: 9px 24px; }
+
+  /* ============ タイトル ============ */
+  #screen-title .lantern {
+    width: 14px; height: 20px; border-radius: 50% 50% 45% 45%;
+    background: radial-gradient(circle at 50% 40%, #ffd98a, #b3752a 70%, transparent 75%);
+    box-shadow: 0 0 26px 8px rgba(255,190,90,.25);
+    margin: 0 22px; display: inline-block;
+  }
+  #screen-title .subtitle { color: var(--gold-dim); font-size: 15px; letter-spacing: .35em; margin-bottom: 14px; }
+  #screen-title h1 { font-size: 46px; color: var(--gold); text-shadow: 0 0 24px rgba(217,180,91,.35); margin: 8px 0 6px; }
+  #screen-title .kana { font-size: 14px; color: var(--gold-dim); letter-spacing: .5em; margin-bottom: 40px; }
+  #screen-title .menu { display: flex; flex-direction: column; gap: 14px; align-items: center; }
+  #screen-title .note { margin-top: 30px; font-size: 12px; color: #9a8a6e; line-height: 1.9; text-align: center; }
+
+  /* ============ 制作パート ============ */
+  #screen-craft { padding: 40px; }
+  .craft-card {
+    width: 700px; max-width: 92%;
+    background: linear-gradient(180deg, rgba(58,42,28,.92), rgba(34,25,16,.92));
+    border: 1px solid var(--gold-dim); border-radius: 6px;
+    padding: 34px 40px; text-align: center;
+    box-shadow: 0 10px 40px var(--shadow);
+  }
+  .craft-step-label { color: var(--gold); font-size: 15px; letter-spacing: .4em; margin-bottom: 6px; }
+  .craft-title { font-size: 28px; color: var(--paper); margin-bottom: 18px; letter-spacing: .2em; }
+  .craft-inst { font-size: 18px; line-height: 2; margin-bottom: 24px; }
+  .craft-trivia {
+    text-align: left; font-size: 14px; line-height: 2; color: #d8c9a8;
+    background: rgba(0,0,0,.3); border-left: 3px solid var(--gold-dim);
+    padding: 14px 18px; border-radius: 0 4px 4px 0;
+  }
+  .craft-trivia::before { content: "◆ 仏師の話"; display: block; color: var(--gold); font-size: 12px; letter-spacing: .3em; margin-bottom: 6px; }
+  .craft-progress { margin: 22px 0 4px; color: var(--gold-dim); font-size: 13px; letter-spacing: .3em; }
+  .craft-icon { font-size: 44px; margin-bottom: 10px; filter: sepia(.4); }
+
+  /* ============ ノベル(共通オーバーレイ) ============ */
+  #novel {
+    position: absolute; inset: 0; display: none; z-index: 40;
+    background: rgba(8,5,3,.72); cursor: pointer;
+  }
+  #novel.active { display: block; }
+  #novel .portrait {
+    position: absolute; left: 60px; bottom: 168px; width: 220px; height: 300px;
+    display: none; align-items: flex-end; justify-content: center;
+  }
+  #novel .portrait.show { display: flex; }
+  /* 上皇の立ち絵プレースホルダー(画像差し替え可) */
+  #novel .portrait .silhouette {
+    width: 180px; height: 280px;
+    background:
+      radial-gradient(circle at 50% 16%, #241a10 0 11%, transparent 12%),
+      linear-gradient(180deg, transparent 0 22%, #241a10 23%);
+    clip-path: polygon(38% 0, 62% 0, 68% 20%, 88% 40%, 96% 100%, 4% 100%, 12% 40%, 32% 20%);
+    box-shadow: 0 0 40px rgba(217,180,91,.12);
+  }
+  #novel .portrait img { display: none; max-width: 100%; max-height: 100%; object-fit: contain; }
+  #novel .portrait.has-image .silhouette { display: none; }
+  #novel .portrait.has-image img { display: block; }
+  #novel .portrait .caption { position: absolute; bottom: -26px; width: 100%; text-align: center; font-size: 12px; color: var(--gold-dim); letter-spacing: .2em; }
+  #novel .textbox {
+    position: absolute; left: 4%; right: 4%; bottom: 26px; min-height: 128px;
+    background: linear-gradient(180deg, rgba(30,22,14,.96), rgba(18,13,8,.96));
+    border: 1px solid var(--gold-dim); border-radius: 6px;
+    padding: 22px 34px 30px; font-size: 17px; line-height: 2.1;
+  }
+  #novel .textbox .cursor {
+    position: absolute; right: 20px; bottom: 10px; color: var(--gold);
+    animation: blink 1.1s infinite; font-size: 14px;
+  }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .15; } }
+
+  /* ============ 願い事入力 ============ */
+  #screen-wish .wish-box {
+    width: 640px; max-width: 90%; text-align: center;
+    background: linear-gradient(180deg, rgba(58,42,28,.92), rgba(34,25,16,.92));
+    border: 1px solid var(--gold-dim); border-radius: 6px; padding: 40px;
+  }
+  #screen-wish p { font-size: 17px; line-height: 2.1; margin-bottom: 26px; }
+  #wish-input {
+    width: 100%; font-family: inherit; font-size: 17px; color: var(--ink);
+    background: var(--paper); border: 2px solid var(--gold-dim); border-radius: 4px;
+    padding: 12px 16px; margin-bottom: 24px; text-align: center;
+  }
+
+  /* ============ キャリブレーション ============ */
+  #screen-calib { padding: 20px; }
+  #screen-calib h2 { color: var(--gold); font-size: 20px; letter-spacing: .3em; margin-bottom: 10px; }
+  .calib-wrap { display: flex; gap: 24px; align-items: flex-start; }
+  #calib-canvas { border: 1px solid var(--gold-dim); border-radius: 4px; background: #000; cursor: crosshair; }
+  .calib-panel { width: 300px; font-size: 13px; line-height: 1.9; }
+  .calib-panel .pickrow { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+  .swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid #665; background: #222; flex: none; }
+  .calib-panel input[type=range] { width: 100%; accent-color: var(--crimson); }
+  .calib-hint { color: #b3a483; font-size: 12px; margin-top: 8px; }
+  #calib-status { margin: 10px 0; min-height: 22px; color: var(--gold); font-size: 13px; }
+
+  /* ============ 運搬パート ============ */
+  #screen-game { cursor: default; }
+  #game-canvas { position: absolute; inset: 0; }
+  #cam-overlay {
+    position: absolute; right: 12px; bottom: 12px; width: 176px; height: 132px;
+    border: 1px solid var(--gold-dim); border-radius: 4px; background: #000; z-index: 10;
+  }
+  #game-warning {
+    position: absolute; top: 88px; width: 100%; text-align: center; z-index: 12;
+    font-size: 24px; color: #ff9a7a; text-shadow: 0 0 12px rgba(255,60,30,.6);
+    letter-spacing: .2em; display: none; animation: blink .5s infinite;
+  }
+  .game-overlay {
+    position: absolute; inset: 0; z-index: 30; display: none;
+    background: rgba(8,5,3,.8);
+    flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  }
+  .game-overlay.active { display: flex; }
+  .game-overlay .panel {
+    background: linear-gradient(180deg, rgba(45,33,21,.97), rgba(25,18,11,.97));
+    border: 1px solid var(--gold-dim); border-radius: 6px; padding: 36px 48px;
+    max-width: 640px; line-height: 2.1; font-size: 16px;
+  }
+  .breath-circle {
+    width: 90px; height: 90px; border-radius: 50%; margin: 20px auto;
+    background: radial-gradient(circle, rgba(217,180,91,.5), rgba(217,180,91,.06) 70%);
+    animation: breathe 4s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100% { transform: scale(.65); opacity:.6; } 50% { transform: scale(1.15); opacity:1; } }
+
+  /* ============ エンディング ============ */
+  #screen-ending { background: radial-gradient(ellipse at 50% 34%, #33261469 0%, transparent 60%); }
+  #ending-visual { position: relative; width: 100%; height: 340px; display: flex; align-items: flex-end; justify-content: center; }
+  /* 中尊(千手観音坐像)プレースホルダー(画像差し替え可) */
+  #chuson {
+    position: relative; width: 300px; height: 300px; display: flex; align-items: flex-end; justify-content: center;
+  }
+  #chuson .glow {
+    position: absolute; inset: -40px;
+    background: radial-gradient(circle at 50% 55%, rgba(255,205,110,.28), transparent 62%);
+  }
+  #chuson .sil {
+    width: 230px; height: 270px;
+    background:
+      radial-gradient(circle at 50% 13%, #1d150c 0 10%, transparent 11%),         /* 頭 */
+      radial-gradient(ellipse at 50% 46%, #1d150c 0 26%, transparent 27%),        /* 胴 */
+      radial-gradient(ellipse at 50% 88%, #1d150c 0 34%, transparent 35%),        /* 坐 */
+      radial-gradient(circle at 50% 40%, rgba(217,180,91,.30), transparent 55%);  /* 光背 */
+    border-radius: 8px;
+  }
+  #chuson img { display: none; max-width: 100%; max-height: 100%; object-fit: contain; position: relative; }
+  #chuson.has-image .sil { display: none; }
+  #chuson.has-image img { display: block; }
+  #ending-statue { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%) translateY(120px); opacity: 0; font-size: 40px; transition: transform 2.4s ease-out, opacity 2.4s; z-index: 2; }
+  #ending-statue.placed { transform: translateX(-50%) translateY(0); opacity: 1; }
+  #result-panel { display: none; text-align: center; margin-top: 8px; }
+  #result-panel.show { display: block; }
+  #result-panel .row { font-size: 17px; margin: 6px 0; letter-spacing: .1em; }
+  #result-panel .praise { color: var(--gold); font-size: 21px; margin: 12px 0; letter-spacing: .25em; text-shadow: 0 0 14px rgba(217,180,91,.5); }
+  #result-panel .closing { font-size: 15px; color: #d8c9a8; margin: 20px 0 24px; line-height: 2; }
+
+  /* お堂の背景画像 差し替え用レイヤー(運搬パートの下敷き) */
+  #hall-bg-img { position: absolute; inset: 0; background-size: cover; background-position: center; display: none; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ タイトル画面 ============ -->
+  <section id="screen-title" class="screen active">
+    <div><span class="lantern"></span><span class="lantern"></span><span class="lantern"></span></div>
+    <p class="subtitle" style="margin-top:26px;">三十三間堂 奉納協力ゲーム</p>
+    <h1>千一体目の観音さま</h1>
+    <p class="kana">(仮)</p>
+    <div class="menu">
+      <button class="btn" id="btn-start-camera">カメラではじめる</button>
+      <button class="btn sub" id="btn-start-keyboard">キーボードモードではじめる</button>
+    </div>
+    <p class="note">
+      用意するもの:紙粘土/台紙(板や厚紙)/色シール2枚(ピンク系・グリーン系)/Webカメラ<br>
+      1〜2人用。キーボードモードは、カメラが使えないときの確認用です。
+    </p>
+  </section>
+
+  <!-- ============ フェーズ1: 粘土制作パート ============ -->
+  <section id="screen-craft" class="screen">
+    <div class="craft-card">
+      <div class="craft-icon" id="craft-icon">🪷</div>
+      <p class="craft-step-label" id="craft-step-label"></p>
+      <h2 class="craft-title" id="craft-title"></h2>
+      <p class="craft-inst" id="craft-inst"></p>
+      <div class="craft-trivia" id="craft-trivia"></div>
+      <p class="craft-progress" id="craft-progress"></p>
+      <button class="btn" id="btn-craft-next">次へ</button>
+    </div>
+  </section>
+
+  <!-- ============ 願い事入力 ============ -->
+  <section id="screen-wish" class="screen">
+    <div class="wish-box">
+      <p>奉納の前に。<br>あなたたちの願い事をひとつ、観音さまにお伝えください。</p>
+      <input id="wish-input" type="text" maxlength="40" placeholder="ここに願い事を書いてください">
+      <br>
+      <button class="btn" id="btn-wish-ok" disabled>観音さまに伝える</button>
+    </div>
+  </section>
+
+  <!-- ============ キャリブレーション ============ -->
+  <section id="screen-calib" class="screen">
+    <h2>― 準備:シールの色を教えてください ―</h2>
+    <div class="calib-wrap">
+      <canvas id="calib-canvas" width="480" height="360"></canvas>
+      <div class="calib-panel">
+        <p>台紙をカメラに向けて構え、下のボタンを押してから、<b>映像の中のシール</b>をクリックしてください。</p>
+        <div class="pickrow">
+          <div class="swatch" id="swatch-pink"></div>
+          <button class="btn sub" id="btn-pick-pink">左のシール(ピンク系)を登録</button>
+        </div>
+        <div class="pickrow">
+          <div class="swatch" id="swatch-green"></div>
+          <button class="btn sub" id="btn-pick-green">右のシール(グリーン系)を登録</button>
+        </div>
+        <p style="margin-top:14px;">色の許容しきい値:<span id="tol-value"></span></p>
+        <input type="range" id="tol-slider" min="10" max="55" step="1">
+        <p class="calib-hint">検出が不安定なら広く、背景を拾ってしまうなら狭く調整します。○印がシールに安定して付けばOKです。</p>
+        <p id="calib-status"></p>
+        <button class="btn" id="btn-calib-done" disabled>準備完了 ― お堂へ</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ フェーズ3: 運搬パート ============ -->
+  <section id="screen-game" class="screen">
+    <div id="hall-bg-img"></div>
+    <canvas id="game-canvas" width="960" height="600"></canvas>
+    <canvas id="cam-overlay" width="176" height="132"></canvas>
+    <p id="game-warning"></p>
+
+    <!-- 開始前の説明 -->
+    <div class="game-overlay" id="overlay-intro">
+      <div class="panel">
+        <p style="color:var(--gold); letter-spacing:.3em; margin-bottom:14px;">― 奉納の道 ―</p>
+        <p>金色に光る「光の道」に沿って、観音さまをお堂の最奥までお運びください。</p>
+        <p id="intro-controls" style="font-size:14px; color:#d8c9a8; margin-top:10px;"></p>
+        <p style="font-size:14px; color:#d8c9a8;">道から外れたり、台紙が15度以上傾くと、観音さまにヒビが入ります。</p>
+        <br>
+        <button class="btn" id="btn-game-start">お運びを始める</button>
+      </div>
+    </div>
+
+    <!-- 休憩画面(ダメージ満タン時) -->
+    <div class="game-overlay" id="overlay-rest">
+      <div class="panel">
+        <p style="font-size:20px; letter-spacing:.2em;">深呼吸して、姿勢を整えましょう</p>
+        <div class="breath-circle"></div>
+        <p style="font-size:14px; color:#d8c9a8;">観音さまは、待っていてくれます。<br>台紙を持ち直したら、ゆっくり再開しましょう。</p>
+        <br>
+        <button class="btn" id="btn-rest-resume">再開する</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ フェーズ4: エンディング ============ -->
+  <section id="screen-ending" class="screen">
+    <div id="ending-visual">
+      <div id="chuson">
+        <div class="glow"></div>
+        <div class="sil"></div>
+        <img id="chuson-img" alt="中尊">
+      </div>
+      <div id="ending-statue">🪷</div>
+    </div>
+    <div id="result-panel">
+      <p class="row">運搬タイム:<span id="result-time"></span></p>
+      <p class="row">ヒビの数:<span id="result-cracks"></span></p>
+      <p class="praise" id="result-praise"></p>
+      <p class="closing">いつか本物の三十三間堂で、あなたに似た顔の観音さまを探してみてください。</p>
+      <button class="btn" id="btn-back-title">タイトルへ戻る</button>
+    </div>
+  </section>
+
+  <!-- ============ ノベル共通オーバーレイ ============ -->
+  <div id="novel">
+    <div class="portrait" id="novel-portrait">
+      <div class="silhouette"></div>
+      <img id="emperor-img" alt="後白河上皇">
+      <p class="caption">後白河上皇</p>
+    </div>
+    <div class="textbox">
+      <span id="novel-text"></span>
+      <span class="cursor">▼</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+/* ================================================================
+   差し替え用パス定数
+   (空文字のときはプレースホルダー表示 / 無音で動作)
+   ================================================================ */
+// 画像: Midjourney 生成画像に差し替え予定
+const IMAGE_PATHS = {
+  emperor: "",   // 後白河上皇の立ち絵 (例: "img/emperor.png")
+  hallBg:  "",   // お堂内部の背景     (例: "img/hall.jpg")
+  chuson:  "",   // 中尊・千手観音坐像 (例: "img/chuson.png")
+};
+// BGM: Suno 生成音源に差し替え予定(場面ごとにループ再生)
+const BGM_PATHS = {
+  title:     "",  // 例: "bgm/title.mp3"
+  craft:     "",
+  novel:     "",
+  transport: "",
+  ending:    "",
+};
+// 効果音
+const SE_PATHS = {
+  crack: "",  // ヒビが入った時
+  warn:  "",  // 傾き警告
+  goal:  "",  // 奉納の瞬間
+};
+
+/* ================================================================
+   カメラ検出パラメータ(環境に合わせて調整)
+   ================================================================ */
+const DETECT = {
+  PROC_W: 160,          // 解析用キャンバスの幅(小さいほど軽い)
+  PROC_H: 120,          // 解析用キャンバスの高さ
+  SCAN_STEP: 2,         // ピクセル走査の間引き(2 = 1つ飛ばし)
+  HUE_TOL_DEFAULT: 28,  // 色相の許容範囲(度)スライダー初期値
+  SAT_MIN: 0.22,        // これ未満の彩度は無彩色として無視
+  VAL_MIN: 0.18,        // これ未満の明度は暗すぎとして無視
+  SAT_TOL: 0.5,         // 登録色との彩度差の許容
+  SMOOTH: 0.35,         // スムージング係数(EMA。大きいほど追従が速い)
+  MIN_PIXELS: 5,        // 検出画素がこれ未満ならロスト扱い
+};
+
+/* ================================================================
+   ゲームバランス定数
+   ================================================================ */
+const GAME = {
+  GOAL_DIST: 6200,        // ゴールまでの距離(ワールドpx)。全長=120mに見立てる
+  MAX_SPEED: 240,         // 最高速度(px/s)
+  ACCEL: 260,             // →キーの加速(px/s^2)
+  BRAKE: 520,             // ←キーの減速(px/s^2)
+  FRICTION: 150,          // キーを離した時の自然減速(px/s^2)
+  TILT_LIMIT: 15,         // 傾き警告のしきい値(度)
+  PATH_HALF: 58,          // 光の道の半幅(px)
+  DAMAGE_PATH: 16,        // 道から外れている間のダメージ(%/s)
+  DAMAGE_TILT: 14,        // 傾きすぎている間のダメージ(%/s)
+  DAMAGE_MAX: 100,        // ゲージ最大
+  CRACK_STEP: 20,         // ヒビが1本増えるダメージ間隔(%)
+  EVENT1_AT: 0.5,         // イベント1の発動位置(進行率)
+  EVENT2_AT: 0.85,        // イベント2の発動位置(進行率)
+  KB_Y_SPEED: 230,        // キーボードモード: 上下速度(px/s)
+  KB_TILT_SPEED: 45,      // キーボードモード: 傾き速度(度/s)
+  KB_TILT_RETURN: 12,     // キーボードモード: 傾きの自動復元(度/s)
+  Y_MIN: 130, Y_MAX: 470, // 観音さまの可動範囲(画面px)
+};
+
+/* ================================================================
+   シナリオテキスト(指定文をそのまま使用)
+   ================================================================ */
+const CRAFT_STEPS = [
+  { title: "芯を作る", icon: "🏔️",
+    inst: "まずは胴体になる芯を作りましょう。粘土を細長い山のような形に。",
+    trivia: "『三十三間堂の千体観音は「寄木造(よせぎづくり)」。一本の木からではなく、複数の木材を組み合わせて作られました。分業で速く、美しく。平安の仏師たちのチームワークの結晶です。』" },
+  { title: "頭を作る", icon: "⚪",
+    inst: "小さな玉を作って、そっと胴体に乗せましょう。",
+    trivia: "『千手観音の頭の上には、さらに11の小さなお顔(十一面)が乗っています。あらゆる方向の人々を見守るためと言われています。』" },
+  { title: "手を添える", icon: "🙌",
+    inst: "細く伸ばした粘土を、体の左右に添えましょう。",
+    trivia: "『「千手」観音といっても実際の腕は42本。2本を除いた40本が、それぞれ25の世界を救うので 40×25=1000。数え方にも祈りが込められています。』" },
+  { title: "顔を整える", icon: "☺️",
+    inst: "表情は自由です。あなたの大切な人を思い浮かべて。",
+    trivia: "『千体の観音像は、一体一体すべて顔が違います。「会いたい人に似た顔が必ず見つかる」と昔から言われてきました。』" },
+  { title: "完成", icon: "🪷",
+    inst: "これで、あなたたちだけの観音さまが生まれました。三十三間堂の千体に続く、千一体目です。",
+    trivia: "『次はこの観音さまを、お堂の最奥までお運びします。ここから先は、二人(あるいは一人二役)の力の見せどころです。』" },
+];
+const PREP_NOTICE = {
+  title: "運搬のご準備", icon: "📋",
+  inst: "台紙(板や厚紙)の左右の端に、目印の色シールを2枚貼ってください(左:ピンク系 / 右:グリーン系)",
+  trivia: "『できあがった観音さまを台紙の真ん中にそっと乗せましょう。このシールをカメラが追いかけて、画面の中の観音さまが動きます。』",
+};
+
+const NOVEL_INTRO = [
+  "平安の世の終わり。都で最も力を持つ人物、後白河上皇(ごしらかわじょうこう)は、長年ひどい頭痛に悩まされていた。",
+  "ある夜、夢枕にお告げが下りる。——「上皇の前世は、熊野の僧・蓮華坊(れんげぼう)。その髑髏(されこうべ)が今も川の底に沈み、そこから柳の木が生えている。風が吹くたび柳が揺れ、髑髏に触れる。それがあなたの頭痛の正体である」",
+  "上皇は平清盛に命じ、髑髏を観音像の中へ納め、柳の木を棟木(むなぎ)に使って、一つのお堂を建てさせた。——千体の観音が立ち並ぶ、南北120メートルの長いお堂。のちに「三十三間堂」と呼ばれる。",
+  "「三十三」は、観音さまが33の姿に変化して人々を救うという教えから。千体の観音は、「一人でも多く、一つでも多くの方法で救いたい」という祈りのかたち。",
+  "……そして今、あなたたちの手で千一体目の観音さまが生まれた。",
+  "上皇の頭痛を癒すため、この観音さまをお堂の最も奥までお運びし、奉納してほしい。長い長い、120メートルの道のり。どうか、落とさぬよう。傾けぬよう。",
+];
+
+const NOVEL_EVENT1 = [
+  "ふと、堂の入口を振り返る。両端に立つ二つの像——風神と雷神。",
+  "彼らはもともと、嵐や雷で人々に恐れられる荒ぶる神だった。しかし観音の力に触れ、いまは千体の観音と人々を守る側にいる。",
+  "「ゆけ」と、風がそっと背中を押した気がした。",
+];
+const NOVEL_EVENT2 = [
+  "最前列に立ち並ぶ、28体の守護神たち——二十八部衆。武将、仙人、女神、獣の顔を持つ者。もとは遠いインドの神々だ。",
+  "海を守る者、学問を司る者、音楽を奏でる者。それぞれが得意分野を持ち、全員で「あらゆる世界」を守っている。",
+  "千年間、この場所で。……あなたたちの観音さまも、今日からその仲間になる。",
+];
+const NOVEL_ENDING = [
+  "千一体目の観音さまが、静かに列に加わった。",
+  "柳は棟木となり、髑髏は観音さまの胎内へ。——その日から、上皇の頭痛はぴたりと止んだという。",
+  "三十三間堂が「頭痛山平癒寺(ずつうさんへいゆじ)」とも呼ばれるのは、この伝説から。今も毎年お正月には、柳の枝で清めた水を頭に注ぐ「楊枝(やなぎ)のお加持」が行われている。",
+];
+
+/* ================================================================
+   状態管理(素直なステートマシン)
+   scene: title / craft / novelIntro / wish / calib / game / ending
+   ================================================================ */
+const state = {
+  scene: "title",
+  kbMode: false,          // キーボードモード(カメラなしフォールバック)
+  craftIndex: 0,          // 制作パートの現在ステップ
+  wish: "",               // 入力された願い事
+  // --- 運搬パート ---
+  phase: "intro",         // intro / play / event / rest / goal
+  dist: 0,                // 進行距離(ワールドpx)
+  speed: 0,               // 現在速度
+  y: 300,                 // 観音さまの画面Y
+  tilt: 0,                // 傾き(度)
+  damage: 0,              // ダメージゲージ(0-100)
+  crackCount: 0,          // 累計ヒビ数(リザルト用)
+  crackStageMax: 0,       // 現ゲージ内で到達したヒビ段階
+  playTime: 0,            // 実プレイ時間(秒)
+  event1Done: false,
+  event2Done: false,
+  lost: false,            // カメラ検出ロスト中か
+  keys: {},               // 押下中キー
+};
+
+/* ================================================================
+   BGM / 効果音フック(パスが空なら何もしない)
+   ================================================================ */
+let bgmAudio = null;
+let currentBgmKey = "";
+function setBgm(key) {
+  // 場面切り替え時に呼ぶ。同じ曲なら継続、パスが空なら停止。
+  if (key === currentBgmKey) return;
+  currentBgmKey = key;
+  const src = BGM_PATHS[key] || "";
+  if (bgmAudio) { bgmAudio.pause(); bgmAudio = null; }
+  if (!src) return;
+  bgmAudio = new Audio(src);
+  bgmAudio.loop = true;
+  bgmAudio.volume = 0.6;
+  bgmAudio.play().catch(() => {}); // 自動再生制限は無視(次のユーザー操作で再生される想定)
+}
+function playSe(key) {
+  const src = SE_PATHS[key] || "";
+  if (!src) return;
+  const se = new Audio(src);
+  se.volume = 0.8;
+  se.play().catch(() => {});
+}
+
+/* ================================================================
+   画像差し替えの適用
+   ================================================================ */
+function applyImages() {
+  if (IMAGE_PATHS.emperor) {
+    document.getElementById("emperor-img").src = IMAGE_PATHS.emperor;
+    document.getElementById("novel-portrait").classList.add("has-image");
+  }
+  if (IMAGE_PATHS.hallBg) {
+    const bg = document.getElementById("hall-bg-img");
+    bg.style.backgroundImage = `url("${IMAGE_PATHS.hallBg}")`;
+    bg.style.display = "block";
+  }
+  if (IMAGE_PATHS.chuson) {
+    document.getElementById("chuson-img").src = IMAGE_PATHS.chuson;
+    document.getElementById("chuson").classList.add("has-image");
+  }
+}
+
+/* ================================================================
+   画面切り替えユーティリティ
+   ================================================================ */
+const $ = (id) => document.getElementById(id);
+function showScreen(name) {
+  document.querySelectorAll(".screen").forEach((el) => el.classList.remove("active"));
+  $("screen-" + name).classList.add("active");
+}
+
+/* ================================================================
+   ノベルエンジン(クリックで進む共通オーバーレイ)
+   ================================================================ */
+const novel = {
+  lines: [], index: 0, onDone: null, active: false,
+  show(lines, opts, onDone) {
+    this.lines = lines; this.index = 0; this.onDone = onDone; this.active = true;
+    $("novel-portrait").classList.toggle("show", !!(opts && opts.portrait));
+    $("novel").classList.add("active");
+    this.render();
+  },
+  render() { $("novel-text").textContent = this.lines[this.index]; },
+  advance() {
+    if (!this.active) return;
+    this.index++;
+    if (this.index >= this.lines.length) {
+      this.active = false;
+      $("novel").classList.remove("active");
+      if (this.onDone) this.onDone();
+    } else {
+      this.render();
+    }
+  },
+};
+$("novel").addEventListener("click", () => novel.advance());
+
+/* ================================================================
+   フェーズ1: 粘土制作パート
+   ================================================================ */
+function startCraft() {
+  state.scene = "craft";
+  state.craftIndex = 0;
+  showScreen("craft");
+  setBgm("craft");
+  renderCraft();
+}
+function renderCraft() {
+  const total = CRAFT_STEPS.length;
+  const isPrep = state.craftIndex >= total;
+  const step = isPrep ? PREP_NOTICE : CRAFT_STEPS[state.craftIndex];
+  $("craft-icon").textContent = step.icon;
+  $("craft-step-label").textContent = isPrep ? "― ご準備 ―" : `STEP ${state.craftIndex + 1}`;
+  $("craft-title").textContent = step.title;
+  $("craft-inst").textContent = step.inst;
+  $("craft-trivia").textContent = step.trivia;
+  $("craft-progress").textContent = isPrep ? "" : `${state.craftIndex + 1} / ${total}`;
+  $("btn-craft-next").textContent = isPrep ? "準備できました" : "次へ";
+}
+$("btn-craft-next").addEventListener("click", () => {
+  state.craftIndex++;
+  if (state.craftIndex > CRAFT_STEPS.length) {
+    startNovelIntro();
+  } else {
+    renderCraft();
+  }
+});
+
+/* ================================================================
+   フェーズ2: 導入ノベル → 願い事入力
+   ================================================================ */
+function startNovelIntro() {
+  state.scene = "novelIntro";
+  showScreen("wish");            // 背後の画面(ノベルの下敷き)
+  $("screen-wish").style.visibility = "hidden";
+  setBgm("novel");
+  novel.show(NOVEL_INTRO, { portrait: true }, () => {
+    $("screen-wish").style.visibility = "visible";
+    state.scene = "wish";
+    $("wish-input").focus();
+  });
+}
+$("wish-input").addEventListener("input", () => {
+  $("btn-wish-ok").disabled = $("wish-input").value.trim() === "";
+});
+$("btn-wish-ok").addEventListener("click", () => {
+  state.wish = $("wish-input").value.trim();
+  if (!state.wish) return;
+  if (state.kbMode) startGame();
+  else startCalib();
+});
+
+/* ================================================================
+   カメラ & 色検出
+   ================================================================ */
+const cam = {
+  video: null,          // <video>要素(非表示)
+  procCanvas: null,     // 解析用の縮小キャンバス
+  procCtx: null,
+  ready: false,
+  hueTol: DETECT.HUE_TOL_DEFAULT,
+  refPink: null,        // 登録色 {h,s,v}
+  refGreen: null,
+  // 検出結果(鏡像座標系 / 解析キャンバス基準)
+  pink:  { x: 0, y: 0, found: false, sx: 0, sy: 0, has: false },
+  green: { x: 0, y: 0, found: false, sx: 0, sy: 0, has: false },
+};
+
+async function initCamera() {
+  if (cam.ready) return true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false,
+    });
+    cam.video = document.createElement("video");
+    cam.video.srcObject = stream;
+    cam.video.setAttribute("playsinline", "");
+    await cam.video.play();
+    cam.procCanvas = document.createElement("canvas");
+    cam.procCanvas.width = DETECT.PROC_W;
+    cam.procCanvas.height = DETECT.PROC_H;
+    cam.procCtx = cam.procCanvas.getContext("2d", { willReadFrequently: true });
+    cam.ready = true;
+    return true;
+  } catch (err) {
+    alert("カメラを起動できませんでした。\n(" + err.message + ")\nキーボードモードでお楽しみください。");
+    return false;
+  }
+}
+
+// RGB(0-255) → HSV(h:0-360, s/v:0-1)
+function rgb2hsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d > 0) {
+    if (max === r) h = 60 * (((g - b) / d) % 6);
+    else if (max === g) h = 60 * ((b - r) / d + 2);
+    else h = 60 * ((r - g) / d + 4);
+  }
+  if (h < 0) h += 360;
+  return [h, max === 0 ? 0 : d / max, max];
+}
+
+// 登録色とのマッチ判定(HSVベースで照明変化に強く)
+function matchColor(r, g, b, ref) {
+  const [h, s, v] = rgb2hsv(r, g, b);
+  if (s < DETECT.SAT_MIN || v < DETECT.VAL_MIN) return false;
+  let dh = Math.abs(h - ref.h);
+  if (dh > 180) dh = 360 - dh;   // 色相は円環なので短い方の距離
+  return dh < cam.hueTol && Math.abs(s - ref.s) < DETECT.SAT_TOL;
+}
+
+// 現在のカメラフレームを鏡像で解析キャンバスへ描画
+function grabFrame() {
+  const ctx = cam.procCtx;
+  ctx.save();
+  ctx.scale(-1, 1);   // 鏡像(左右反転)。以降すべて鏡像座標系で扱う
+  ctx.drawImage(cam.video, -DETECT.PROC_W, 0, DETECT.PROC_W, DETECT.PROC_H);
+  ctx.restore();
+  return ctx.getImageData(0, 0, DETECT.PROC_W, DETECT.PROC_H);
+}
+
+// 2色を間引き走査で検出し、重心をスムージングして更新
+function detectMarkers() {
+  if (!cam.ready) return;
+  const img = grabFrame();
+  const data = img.data;
+  const step = DETECT.SCAN_STEP;
+  const acc = {
+    pink:  { sx: 0, sy: 0, n: 0 },
+    green: { sx: 0, sy: 0, n: 0 },
+  };
+  for (let y = 0; y < DETECT.PROC_H; y += step) {
+    for (let x = 0; x < DETECT.PROC_W; x += step) {
+      const i = (y * DETECT.PROC_W + x) * 4;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      if (cam.refPink && matchColor(r, g, b, cam.refPink)) {
+        acc.pink.sx += x; acc.pink.sy += y; acc.pink.n++;
+      } else if (cam.refGreen && matchColor(r, g, b, cam.refGreen)) {
+        acc.green.sx += x; acc.green.sy += y; acc.green.n++;
+      }
+    }
+  }
+  for (const key of ["pink", "green"]) {
+    const a = acc[key], m = cam[key];
+    if (a.n >= DETECT.MIN_PIXELS) {
+      const cx = a.sx / a.n, cy = a.sy / a.n;
+      if (m.has) {
+        // 移動平均(EMA)でジッターを抑える
+        m.x += (cx - m.x) * DETECT.SMOOTH;
+        m.y += (cy - m.y) * DETECT.SMOOTH;
+      } else {
+        m.x = cx; m.y = cy; m.has = true;
+      }
+      m.found = true;
+    } else {
+      m.found = false;
+    }
+  }
+}
+
+/* ================================================================
+   キャリブレーション画面
+   ================================================================ */
+let pickTarget = null; // "pink" | "green" | null
+const calibCanvas = $("calib-canvas");
+const calibCtx = calibCanvas.getContext("2d");
+
+async function startCalib() {
+  const ok = await initCamera();
+  if (!ok) { state.kbMode = true; startGame(); return; }
+  state.scene = "calib";
+  showScreen("calib");
+  setBgm("novel");
+  updateCalibStatus();
+}
+
+$("tol-slider").value = DETECT.HUE_TOL_DEFAULT;
+$("tol-value").textContent = DETECT.HUE_TOL_DEFAULT;
+$("tol-slider").addEventListener("input", (e) => {
+  cam.hueTol = Number(e.target.value);
+  $("tol-value").textContent = e.target.value;
+});
+$("btn-pick-pink").addEventListener("click", () => { pickTarget = "pink"; updateCalibStatus(); });
+$("btn-pick-green").addEventListener("click", () => { pickTarget = "green"; updateCalibStatus(); });
+
+calibCanvas.addEventListener("click", (e) => {
+  if (!pickTarget || !cam.ready) return;
+  // クリック位置 → 解析キャンバス座標(どちらも鏡像描画なのでそのまま比例変換)
+  const rect = calibCanvas.getBoundingClientRect();
+  const px = Math.round((e.clientX - rect.left) / rect.width * DETECT.PROC_W);
+  const py = Math.round((e.clientY - rect.top) / rect.height * DETECT.PROC_H);
+  const img = grabFrame();
+  // クリック点の周囲 5x5 を平均して登録色にする(1画素だとノイズに弱い)
+  let sr = 0, sg = 0, sb = 0, n = 0;
+  for (let dy = -2; dy <= 2; dy++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      const x = px + dx, y = py + dy;
+      if (x < 0 || y < 0 || x >= DETECT.PROC_W || y >= DETECT.PROC_H) continue;
+      const i = (y * DETECT.PROC_W + x) * 4;
+      sr += img.data[i]; sg += img.data[i + 1]; sb += img.data[i + 2]; n++;
+    }
+  }
+  const [h, s, v] = rgb2hsv(sr / n, sg / n, sb / n);
+  const ref = { h, s, v, rgb: `rgb(${Math.round(sr/n)},${Math.round(sg/n)},${Math.round(sb/n)})` };
+  if (pickTarget === "pink") cam.refPink = ref; else cam.refGreen = ref;
+  $("swatch-" + pickTarget).style.background = ref.rgb;
+  pickTarget = null;
+  updateCalibStatus();
+});
+
+function updateCalibStatus() {
+  const st = $("calib-status");
+  if (pickTarget === "pink") st.textContent = "映像の中の「ピンクのシール」をクリックしてください";
+  else if (pickTarget === "green") st.textContent = "映像の中の「グリーンのシール」をクリックしてください";
+  else if (!cam.refPink || !cam.refGreen) st.textContent = "2色とも登録すると出発できます";
+  else st.textContent = "登録OK。○印がシールに付いているか確かめてください";
+  $("btn-calib-done").disabled = !(cam.refPink && cam.refGreen);
+}
+$("btn-calib-done").addEventListener("click", () => startGame());
+
+// キャリブレーション画面の描画(毎フレーム)
+function renderCalib() {
+  if (!cam.ready) return;
+  detectMarkers();
+  const w = calibCanvas.width, h = calibCanvas.height;
+  calibCtx.save();
+  calibCtx.scale(-1, 1);   // 鏡像表示
+  calibCtx.drawImage(cam.video, -w, 0, w, h);
+  calibCtx.restore();
+  drawMarkerRings(calibCtx, w, h);
+}
+
+// 検出マーカーの○印を描く(解析座標 → 任意キャンバス座標)
+function drawMarkerRings(ctx, w, h) {
+  const sx = w / DETECT.PROC_W, sy = h / DETECT.PROC_H;
+  for (const [key, color] of [["pink", "#ff5fa0"], ["green", "#4fe07a"]]) {
+    const m = cam[key];
+    if (!cam["ref" + (key === "pink" ? "Pink" : "Green")] || !m.found) continue;
+    ctx.beginPath();
+    ctx.arc(m.x * sx, m.y * sy, Math.max(8, w * 0.03), 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+}
+
+/* ================================================================
+   フェーズ3: 運搬パート
+   ================================================================ */
+const gameCanvas = $("game-canvas");
+const gctx = gameCanvas.getContext("2d");
+const camOverlay = $("cam-overlay");
+const octx = camOverlay.getContext("2d");
+const W = gameCanvas.width, H = gameCanvas.height;
+const STATUE_X = 250;   // 観音さまの画面上の固定X
+
+// 光の道: ワールドXに対する中心Y(ゆるやかにうねる)
+function pathY(worldX) {
+  return 300
+    + 85 * Math.sin(worldX * 0.0042)
+    + 42 * Math.sin(worldX * 0.0117 + 2.1);
+}
+
+function startGame() {
+  state.scene = "game";
+  state.phase = "intro";
+  state.dist = 0; state.speed = 0;
+  state.y = pathY(STATUE_X); state.tilt = 0;
+  state.damage = 0; state.crackCount = 0; state.crackStageMax = 0;
+  state.playTime = 0;
+  state.event1Done = false; state.event2Done = false;
+  state.lost = false;
+  showScreen("game");
+  setBgm("transport");
+  camOverlay.style.display = state.kbMode ? "none" : "block";
+  $("intro-controls").innerHTML = state.kbMode
+    ? "W / S:上下 A / D:傾き ← / →:進む・止まる"
+    : "粘土係:台紙の上下と傾きで観音さまを導く<br>キーボード係:← / →キーで進む速さを決める(1人のときは左手に台紙・右手にキーボード)";
+  $("overlay-intro").classList.add("active");
+  $("overlay-rest").classList.remove("active");
+}
+$("btn-game-start").addEventListener("click", () => {
+  $("overlay-intro").classList.remove("active");
+  state.phase = "play";
+});
+$("btn-rest-resume").addEventListener("click", () => {
+  $("overlay-rest").classList.remove("active");
+  state.damage = 0;
+  state.crackStageMax = 0;
+  state.phase = "play";
+});
+
+/* ---- 入力 ---- */
+window.addEventListener("keydown", (e) => {
+  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(e.key)) e.preventDefault();
+  state.keys[e.key.toLowerCase()] = true;
+  state.keys[e.key] = true;
+});
+window.addEventListener("keyup", (e) => {
+  state.keys[e.key.toLowerCase()] = false;
+  state.keys[e.key] = false;
+});
+
+/* ---- 更新 ---- */
+function updateGame(dt) {
+  if (state.phase !== "play") return;
+  state.playTime += dt;
+
+  /* --- 上下・傾きの入力 --- */
+  if (state.kbMode) {
+    // キーボードモード: W/S 上下、A/D 傾き
+    if (state.keys["w"]) state.y -= GAME.KB_Y_SPEED * dt;
+    if (state.keys["s"]) state.y += GAME.KB_Y_SPEED * dt;
+    if (state.keys["a"]) state.tilt -= GAME.KB_TILT_SPEED * dt;
+    else if (state.keys["d"]) state.tilt += GAME.KB_TILT_SPEED * dt;
+    else {
+      // 何も押していなければ傾きはゆっくり水平へ戻る
+      const back = GAME.KB_TILT_RETURN * dt;
+      if (Math.abs(state.tilt) <= back) state.tilt = 0;
+      else state.tilt -= Math.sign(state.tilt) * back;
+    }
+    state.tilt = Math.max(-45, Math.min(45, state.tilt));
+    state.lost = false;
+  } else {
+    detectMarkers();
+    const p = cam.pink, g = cam.green;
+    state.lost = !(p.found && g.found);
+    if (!state.lost) {
+      // 2点の中点Y → 観音さまの上下位置
+      const midY = (p.y + g.y) / 2 / DETECT.PROC_H;              // 0..1
+      state.y = GAME.Y_MIN + midY * (GAME.Y_MAX - GAME.Y_MIN);
+      // 2点を結ぶ直線の角度 → 傾き(鏡像座標系で計算済みなので見た目と一致)
+      const ang = Math.atan2(g.y - p.y, g.x - p.x) * 180 / Math.PI;
+      state.tilt = Math.max(-90, Math.min(90, ang));
+    }
+    // ロスト時は y / tilt を凍結(誤動作で落とさない)
+  }
+  state.y = Math.max(GAME.Y_MIN, Math.min(GAME.Y_MAX, state.y));
+
+  /* --- 前進速度(←→キー) --- */
+  if (state.lost) {
+    // ロスト中は安全のため停止方向へ
+    state.speed = Math.max(0, state.speed - GAME.BRAKE * dt);
+  } else if (state.keys["ArrowRight"]) {
+    state.speed = Math.min(GAME.MAX_SPEED, state.speed + GAME.ACCEL * dt);
+  } else if (state.keys["ArrowLeft"]) {
+    state.speed = Math.max(0, state.speed - GAME.BRAKE * dt);
+  } else {
+    state.speed = Math.max(0, state.speed - GAME.FRICTION * dt);
+  }
+  state.dist += state.speed * dt;
+
+  /* --- ダメージ判定 --- */
+  const safeY = pathY(state.dist + STATUE_X);
+  const offPath = Math.abs(state.y - safeY) > GAME.PATH_HALF;
+  const tilted = Math.abs(state.tilt) > GAME.TILT_LIMIT;
+  if (!state.lost && (offPath || tilted)) {
+    state.damage += ((offPath ? GAME.DAMAGE_PATH : 0) + (tilted ? GAME.DAMAGE_TILT : 0)) * dt;
+    state.damage = Math.min(GAME.DAMAGE_MAX, state.damage);
+    // ヒビの段階が進んだらカウント
+    const stage = Math.floor(state.damage / GAME.CRACK_STEP);
+    if (stage > state.crackStageMax) {
+      state.crackCount += stage - state.crackStageMax;
+      state.crackStageMax = stage;
+      playSe("crack");
+    }
+  }
+
+  /* --- 警告表示 --- */
+  const warn = $("game-warning");
+  if (state.lost) {
+    warn.textContent = "シールを見失いました ― 台紙をカメラに向けてください";
+    warn.style.display = "block";
+  } else if (tilted) {
+    warn.textContent = "危ない! 傾いています!";
+    warn.style.display = "block";
+  } else if (offPath) {
+    warn.textContent = "光の道から外れています……";
+    warn.style.display = "block";
+  } else {
+    warn.style.display = "none";
+  }
+
+  /* --- ダメージ満タン → 休憩 --- */
+  if (state.damage >= GAME.DAMAGE_MAX) {
+    state.phase = "rest";
+    state.speed = 0;
+    warn.style.display = "none";
+    $("overlay-rest").classList.add("active");
+    return;
+  }
+
+  /* --- 道中イベント --- */
+  const progress = state.dist / GAME.GOAL_DIST;
+  if (!state.event1Done && progress >= GAME.EVENT1_AT) {
+    state.event1Done = true;
+    triggerEvent(NOVEL_EVENT1);
+    return;
+  }
+  if (!state.event2Done && progress >= GAME.EVENT2_AT) {
+    state.event2Done = true;
+    triggerEvent(NOVEL_EVENT2);
+    return;
+  }
+
+  /* --- ゴール判定 --- */
+  if (state.dist >= GAME.GOAL_DIST) {
+    state.phase = "goal";
+    state.speed = 0;
+    warn.style.display = "none";
+    playSe("goal");
+    setTimeout(startEnding, 1200);
+  }
+}
+
+// 道中イベント: 一時停止してノベル表示
+function triggerEvent(lines) {
+  state.phase = "event";
+  state.speed = 0;
+  $("game-warning").style.display = "none";
+  novel.show(lines, {}, () => { state.phase = "play"; });
+}
+
+/* ---- 描画 ---- */
+function renderGame() {
+  const ctx = gctx;
+  ctx.clearRect(0, 0, W, H);
+
+  /* 背景: 薄暗いお堂(奥行きのグラデーション) */
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, "#1d150c");
+  bgGrad.addColorStop(0.62, "#2b1f12");
+  bgGrad.addColorStop(0.72, "#3a2a18");
+  bgGrad.addColorStop(1, "#241a0e");
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  /* 奥の千体観音(パララックス0.3で流れる金色の列) */
+  const far = state.dist * 0.3;
+  ctx.save();
+  for (let i = -1; i < 16; i++) {
+    const x = ((i * 68 - far % 68) + 68) % (W + 68) - 34;
+    const gy = 335;
+    ctx.fillStyle = "rgba(217,180,91,0.16)";
+    ctx.beginPath(); ctx.arc(x, gy - 26, 13, 0, Math.PI * 2); ctx.fill(); // 光背
+    ctx.fillStyle = "rgba(160,128,60,0.30)";
+    ctx.beginPath(); ctx.arc(x, gy - 26, 5, 0, Math.PI * 2); ctx.fill();  // 頭
+    ctx.fillRect(x - 7, gy - 22, 14, 34);                                  // 体
+  }
+  ctx.restore();
+
+  /* 床 */
+  ctx.fillStyle = "#171006";
+  ctx.fillRect(0, 372, W, H - 372);
+  ctx.strokeStyle = "rgba(217,180,91,0.10)";
+  ctx.lineWidth = 1;
+  const floorScroll = state.dist % 120;
+  for (let i = 0; i < 12; i++) {
+    const x = i * 120 - floorScroll;
+    ctx.beginPath(); ctx.moveTo(x, 372); ctx.lineTo(x - 80, H); ctx.stroke(); // 床板の目地
+  }
+
+  /* 柱(パララックス1.0、等間隔) */
+  const pillarGap = 420;
+  const scroll = state.dist % pillarGap;
+  for (let i = -1; i < 4; i++) {
+    const x = i * pillarGap - scroll + 120;
+    const grad = ctx.createLinearGradient(x - 22, 0, x + 22, 0);
+    grad.addColorStop(0, "#2a1c0f");
+    grad.addColorStop(0.5, "#59402a");
+    grad.addColorStop(1, "#20140a");
+    ctx.fillStyle = grad;
+    ctx.fillRect(x - 22, 0, 44, 400);
+    ctx.fillStyle = "#4a3016";
+    ctx.fillRect(x - 30, 0, 60, 26);   // 梁
+    // 柱元の灯り
+    const lg = ctx.createRadialGradient(x, 392, 4, x, 392, 60);
+    lg.addColorStop(0, "rgba(255,200,110,0.35)");
+    lg.addColorStop(1, "rgba(255,200,110,0)");
+    ctx.fillStyle = lg;
+    ctx.beginPath(); ctx.arc(x, 392, 60, 0, Math.PI * 2); ctx.fill();
+  }
+
+  /* 光の道(安全ルート) */
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const [half, alpha] of [[GAME.PATH_HALF, 0.10], [GAME.PATH_HALF * 0.55, 0.10], [4, 0.5]]) {
+    ctx.beginPath();
+    for (let sx = 0; sx <= W; sx += 16) {
+      const y = pathY(state.dist + sx);
+      if (sx === 0) ctx.moveTo(sx, y); else ctx.lineTo(sx, y);
+    }
+    ctx.strokeStyle = `rgba(255,214,120,${alpha})`;
+    ctx.lineWidth = half * 2;
+    ctx.lineCap = "round";
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  /* ゴールの気配(残り距離が近いと奥から光) */
+  const remain = GAME.GOAL_DIST - state.dist;
+  if (remain < 1400) {
+    const a = Math.min(0.5, (1400 - remain) / 1400 * 0.6);
+    const gg = ctx.createRadialGradient(W - 60, 300, 10, W - 60, 300, 420);
+    gg.addColorStop(0, `rgba(255,225,150,${a})`);
+    gg.addColorStop(1, "rgba(255,225,150,0)");
+    ctx.fillStyle = gg;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  /* 運搬中の観音さま */
+  drawStatue(ctx, STATUE_X, state.y, state.tilt * Math.PI / 180);
+
+  /* HUD */
+  drawHud(ctx);
+
+  /* カメラ小窓 */
+  if (!state.kbMode && cam.ready) {
+    const ow = camOverlay.width, oh = camOverlay.height;
+    octx.save();
+    octx.scale(-1, 1);
+    octx.drawImage(cam.video, -ow, 0, ow, oh);
+    octx.restore();
+    drawMarkerRings(octx, ow, oh);
+    if (state.lost) {
+      octx.fillStyle = "rgba(180,30,20,0.35)";
+      octx.fillRect(0, 0, ow, oh);
+    }
+  }
+}
+
+// 観音さま(台紙に乗った像)を描く
+function drawStatue(ctx, x, y, rad) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rad);
+
+  // 光背(後光)
+  const halo = ctx.createRadialGradient(0, -26, 4, 0, -26, 44);
+  halo.addColorStop(0, "rgba(255,226,150,0.75)");
+  halo.addColorStop(1, "rgba(255,226,150,0)");
+  ctx.fillStyle = halo;
+  ctx.beginPath(); ctx.arc(0, -26, 44, 0, Math.PI * 2); ctx.fill();
+
+  // 台紙
+  ctx.fillStyle = "#8a6b45";
+  ctx.fillRect(-56, 26, 112, 9);
+  // 目印シール(左ピンク・右グリーン)
+  ctx.fillStyle = "#ff5fa0";
+  ctx.beginPath(); ctx.arc(-48, 30.5, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#4fe07a";
+  ctx.beginPath(); ctx.arc(48, 30.5, 5, 0, Math.PI * 2); ctx.fill();
+
+  // 体(金色)
+  const body = ctx.createLinearGradient(0, -20, 0, 26);
+  body.addColorStop(0, "#e8c877");
+  body.addColorStop(1, "#a5813e");
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.moveTo(-16, 26);
+  ctx.quadraticCurveTo(-14, -8, -6, -16);
+  ctx.lineTo(6, -16);
+  ctx.quadraticCurveTo(14, -8, 16, 26);
+  ctx.closePath();
+  ctx.fill();
+  // 手(左右に添えた腕)
+  ctx.strokeStyle = "#d9b45b";
+  ctx.lineWidth = 4; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(-10, -4); ctx.quadraticCurveTo(-24, 2, -20, 14); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(10, -4); ctx.quadraticCurveTo(24, 2, 20, 14); ctx.stroke();
+  // 頭
+  ctx.fillStyle = "#e8c877";
+  ctx.beginPath(); ctx.arc(0, -26, 11, 0, Math.PI * 2); ctx.fill();
+  // 十一面(頭上の小さな面)
+  ctx.fillStyle = "#c8a557";
+  ctx.beginPath(); ctx.arc(0, -38, 4.5, 0, Math.PI * 2); ctx.fill();
+  // 顔(穏やかな目)
+  ctx.strokeStyle = "#5a4020";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(-5, -27); ctx.quadraticCurveTo(-3, -25.4, -1.2, -27); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(1.2, -27); ctx.quadraticCurveTo(3, -25.4, 5, -27); ctx.stroke();
+
+  // ヒビ(現在のダメージ段階ぶん描く)
+  const stage = Math.floor(state.damage / GAME.CRACK_STEP);
+  ctx.strokeStyle = "rgba(40,22,8,0.9)";
+  ctx.lineWidth = 1.6;
+  // 疑似乱数(段階ごとに同じ形のヒビ)
+  for (let c = 0; c < stage; c++) {
+    const seed = c * 37.7;
+    let cx = Math.sin(seed) * 10, cy = -20 + ((c * 13) % 40);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    for (let s = 0; s < 3; s++) {
+      cx += Math.sin(seed + s * 3.1) * 7;
+      cy += 5 + (s % 2) * 3;
+      ctx.lineTo(cx, cy);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// HUD(進行度・ダメージゲージ・傾き)
+function drawHud(ctx) {
+  /* 進行バー */
+  const meters = Math.min(120, state.dist / GAME.GOAL_DIST * 120);
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(180, 18, 600, 30);
+  ctx.strokeStyle = "rgba(217,180,91,0.5)";
+  ctx.strokeRect(180.5, 18.5, 599, 29);
+  ctx.fillStyle = "rgba(217,180,91,0.75)";
+  ctx.fillRect(183, 21, 594 * Math.min(1, state.dist / GAME.GOAL_DIST), 24);
+  ctx.fillStyle = "#f0e6d2";
+  ctx.font = "13px serif";
+  ctx.textAlign = "center";
+  ctx.fillText(`最奥まで ${meters.toFixed(0)} / 120 m`, 480, 38);
+
+  /* ダメージゲージ */
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#f0e6d2";
+  ctx.fillText("ヒビ", 24, 32);
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(24, 40, 120, 12);
+  const dmgRatio = state.damage / GAME.DAMAGE_MAX;
+  ctx.fillStyle = dmgRatio > 0.7 ? "#c33a2a" : "#a5813e";
+  ctx.fillRect(24, 40, 120 * dmgRatio, 12);
+  ctx.strokeStyle = "rgba(217,180,91,0.5)";
+  ctx.strokeRect(24.5, 40.5, 119, 11);
+
+  /* 傾きインジケータ */
+  ctx.fillStyle = "#f0e6d2";
+  ctx.fillText(`傾き ${state.tilt.toFixed(0)}°`, 24, 78);
+  ctx.save();
+  ctx.translate(90, 96);
+  ctx.rotate(state.tilt * Math.PI / 180);
+  ctx.strokeStyle = Math.abs(state.tilt) > GAME.TILT_LIMIT ? "#ff7a5a" : "rgba(217,180,91,0.8)";
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-26, 0); ctx.lineTo(26, 0); ctx.stroke();
+  ctx.restore();
+
+  /* タイム */
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#f0e6d2";
+  ctx.fillText(formatTime(state.playTime), 936, 32);
+  ctx.textAlign = "left";
+}
+
+function formatTime(sec) {
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/* ================================================================
+   フェーズ4: 奉納・エンディング
+   ================================================================ */
+function startEnding() {
+  state.scene = "ending";
+  showScreen("ending");
+  setBgm("ending");
+  $("result-panel").classList.remove("show");
+  const statue = $("ending-statue");
+  statue.classList.remove("placed");
+  // 観音さまが静かに列に加わる演出
+  setTimeout(() => statue.classList.add("placed"), 300);
+  setTimeout(() => {
+    const lines = [
+      ...NOVEL_ENDING,
+      `あなたたちの願い——「${state.wish}」。千一体の観音さまが、確かに聞き届けました。`,
+    ];
+    novel.show(lines, {}, showResult);
+  }, 2800);
+}
+
+function showResult() {
+  $("result-time").textContent = formatTime(state.playTime);
+  $("result-cracks").textContent = `${state.crackCount} 本`;
+  $("result-praise").textContent =
+    state.crackCount === 0 ? "見事な奉納!" :
+    state.crackCount <= 3 ? "心のこもった奉納でした" :
+    "長い道のり、よくお運びしました";
+  $("result-panel").classList.add("show");
+}
+
+$("btn-back-title").addEventListener("click", () => {
+  state.scene = "title";
+  $("wish-input").value = "";
+  $("btn-wish-ok").disabled = true;
+  $("screen-wish").style.visibility = "visible";
+  showScreen("title");
+  setBgm("title");
+});
+
+/* ================================================================
+   タイトル画面
+   ================================================================ */
+$("btn-start-camera").addEventListener("click", () => {
+  state.kbMode = false;
+  startCraft();
+});
+$("btn-start-keyboard").addEventListener("click", () => {
+  state.kbMode = true;
+  startCraft();
+});
+
+/* ================================================================
+   メインループ
+   ================================================================ */
+let lastTs = 0;
+function loop(ts) {
+  const dt = Math.min(0.05, (ts - lastTs) / 1000 || 0); // タブ復帰時の暴走防止
+  lastTs = ts;
+  if (state.scene === "calib") {
+    renderCalib();
+  } else if (state.scene === "game") {
+    updateGame(dt);
+    renderGame();
+  }
+  requestAnimationFrame(loop);
+}
+
+applyImages();
+setBgm("title");
+requestAnimationFrame(loop);
+
+// デバッグ用フック(コンソールから状態確認・早送りができる)
+window.__G = { state, cam, GAME, DETECT };
+</script>
+</body>
+</html>
