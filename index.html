@@ -138,7 +138,7 @@
   }
   #novel.active { display: block; }
   #novel .portrait {
-    position: absolute; left: 60px; bottom: 168px; width: 220px; height: 300px;
+    position: absolute; left: 60px; bottom: 175px; width: 260px; height: 330px;
     display: none; align-items: flex-end; justify-content: center;
   }
   #novel .portrait.show { display: flex; }
@@ -154,6 +154,7 @@
   #novel .portrait img { display: none; max-width: 100%; max-height: 100%; object-fit: contain; }
   #novel .portrait.has-image .silhouette { display: none; }
   #novel .portrait.has-image img { display: block; }
+  #novel .portrait.has-image .caption { display: none; } /* 立ち絵があれば名札は不要 */
   #novel .portrait .caption { position: absolute; bottom: -26px; width: 100%; text-align: center; font-size: 12px; color: var(--gold-dim); letter-spacing: .2em; }
   #novel .textbox {
     position: absolute; left: 4%; right: 4%; bottom: 26px; min-height: 128px;
@@ -399,10 +400,10 @@
    ================================================================ */
 // 画像: Midjourney 生成画像に差し替え予定
 const IMAGE_PATHS = {
-  emperor: "",   // 後白河上皇の立ち絵 (例: "img/emperor.png")
-  busshi:  "",   // 語り手の仏師の立ち絵(制作パート) (例: "img/busshi.png")
-  hallBg:  "",   // お堂内部の背景     (例: "img/hall.jpg")
-  chuson:  "",   // 中尊・千手観音坐像 (例: "img/chuson.png")
+  emperor: "img/emperor.png",  // 後白河上皇の立ち絵
+  busshi:  "img/busshi.png",   // 語り手の仏師の立ち絵(制作パート)
+  hallBg:  "",                 // お堂内部の背景     (例: "img/hall.jpg")
+  chuson:  "",                 // 中尊・千手観音坐像 (例: "img/chuson.png")
 };
 // BGM: Suno 生成音源に差し替え予定(場面ごとにループ再生)
 const BGM_PATHS = {
