@@ -103,6 +103,13 @@
   #screen-title .kana { font-size: 14px; color: var(--gold-dim); letter-spacing: .5em; margin-bottom: 40px; }
   #screen-title .menu { display: flex; flex-direction: column; gap: 14px; align-items: center; }
   #screen-title .note { margin-top: 30px; font-size: 12px; color: #9a8a6e; line-height: 1.9; text-align: center; }
+  /* キービジュアル使用時: タイトル文字は画像側にあるためテキスト類を隠し、ボタンを下部へ */
+  #screen-title.has-title-image { justify-content: flex-end; padding-bottom: 34px; }
+  #screen-title.has-title-image .lanterns,
+  #screen-title.has-title-image .subtitle,
+  #screen-title.has-title-image h1,
+  #screen-title.has-title-image .kana { display: none; }
+  #screen-title.has-title-image .note { color: #c9b896; text-shadow: 0 1px 4px rgba(0,0,0,.9); margin-top: 18px; }
 
   /* ============ 制作パート ============ */
   #screen-craft { padding: 40px; }
@@ -285,7 +292,7 @@
 
   <!-- ============ タイトル画面 ============ -->
   <section id="screen-title" class="screen active">
-    <div><span class="lantern"></span><span class="lantern"></span><span class="lantern"></span></div>
+    <div class="lanterns"><span class="lantern"></span><span class="lantern"></span><span class="lantern"></span></div>
     <p class="subtitle" style="margin-top:26px;">三十三間堂 奉納協力ゲーム</p>
     <h1>千一体目の観音さま</h1>
     <p class="kana">(仮)</p>
@@ -432,6 +439,7 @@ const IMAGE_PATHS = {
   busshi:       "img/busshi.png",          // 語り手の仏師の立ち絵(制作パート)
   kannonPlayer: "img/kannon_player.png",   // プレイヤーが動かす観音さま(運搬パート)
   kannonBg:     "img/kannon_bg.png",       // 背景に立ち並ぶ千体観音(運搬パート)
+  titleBg:      "img/bg_title.jpg",        // タイトル画面のキービジュアル(タイトル文字入り)
   eventFujin:   "img/bg_fujin_raijin.jpg", // イベント1「風神・雷神」の背景
   event28:      "img/bg_28bushu.jpg",      // イベント2「二十八部衆」の背景
   goalBg:       "img/bg_goal.jpg",         // ゴール直後・奉納シーンの背景
@@ -540,6 +548,7 @@ const NOVEL_ENDING = [
   "千一体目の観音さまが、静かに列に加わりました。",
   "柳は棟木に、髑髏は観音さまの胎内へ。——その日から、上皇さまの頭痛はぴたりと止んだと伝えられています。",
   "三十三間堂が「頭痛山平癒寺(ずつうさんへいゆじ)」とも呼ばれるのは、この伝説から。今でも毎年お正月には、柳の枝で清めた水を頭に注ぐ「楊枝(やなぎ)のお加持」が行われているんですよ。",
+  "ちなみに——中尊さまを合わせれば、お堂にはもともと1001体。「じゃあ、自分たちのは1002体目?」……いえいえ、中尊さまは別格。千体の列に加わるのは、あなたたちの観音さまが千一体目、なんですね。",
 ];
 
 /* ================================================================
@@ -608,6 +617,15 @@ function applyImages() {
     img.src = IMAGE_PATHS.kannonPlayer;
     img.style.display = "block";
     document.getElementById("ending-statue-emoji").style.display = "none";
+  }
+  if (IMAGE_PATHS.titleBg) {
+    // タイトルのキービジュアル(タイトル文字は画像側に入っているのでテキストは隠す)
+    const sc = document.getElementById("screen-title");
+    sc.style.backgroundImage =
+      `linear-gradient(180deg, rgba(10,6,3,0) 55%, rgba(10,6,3,.72) 100%), url("${IMAGE_PATHS.titleBg}")`;
+    sc.style.backgroundSize = "cover";
+    sc.style.backgroundPosition = "center top";
+    sc.classList.add("has-title-image");
   }
   if (IMAGE_PATHS.goalBg) {
     // ゴール直後・奉納シーンの背景(中尊のプレースホルダーは隠す)
