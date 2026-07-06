@@ -257,6 +257,7 @@
   #chuson.has-image .sil { display: none; }
   #chuson.has-image img { display: block; }
   #ending-statue { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%) translateY(120px); opacity: 0; font-size: 40px; transition: transform 2.4s ease-out, opacity 2.4s; z-index: 2; }
+  #ending-statue img { display: none; height: 96px; filter: drop-shadow(0 4px 14px rgba(255,215,120,.35)); }
   #ending-statue.placed { transform: translateX(-50%) translateY(0); opacity: 1; }
   #result-panel { display: none; text-align: center; margin-top: 8px; }
   #result-panel.show { display: block; }
@@ -375,7 +376,10 @@
         <div class="sil"></div>
         <img id="chuson-img" alt="中尊">
       </div>
-      <div id="ending-statue">🪷</div>
+      <div id="ending-statue">
+        <span id="ending-statue-emoji">🪷</span>
+        <img id="ending-statue-img" alt="千一体目の観音さま">
+      </div>
     </div>
     <div id="result-panel">
       <p class="row">運搬タイム:<span id="result-time"></span></p>
@@ -411,10 +415,13 @@
    ================================================================ */
 // 画像: Midjourney 生成画像に差し替え予定
 const IMAGE_PATHS = {
-  emperor: "img/emperor.png",  // 後白河上皇の立ち絵
-  busshi:  "img/busshi.png",   // 語り手の仏師の立ち絵(制作パート)
-  hallBg:  "",                 // お堂内部の背景     (例: "img/hall.jpg")
-  chuson:  "",                 // 中尊・千手観音坐像 (例: "img/chuson.png")
+  emperor:      "img/emperor.png",       // 後白河上皇の立ち絵(通常)
+  emperorPain:  "img/emperor_pain.png",  // 後白河上皇の立ち絵(頭痛)
+  busshi:       "img/busshi.png",        // 語り手の仏師の立ち絵(制作パート)
+  kannonPlayer: "img/kannon_player.png", // プレイヤーが動かす観音さま(運搬パート)
+  kannonBg:     "img/kannon_bg.png",     // 背景に立ち並ぶ千体観音(運搬パート)
+  hallBg:       "",                      // お堂内部の背景     (例: "img/hall.jpg")
+  chuson:       "",                      // 中尊・千手観音坐像 (例: "img/chuson.png")
 };
 // BGM: Suno 生成音源に差し替え予定(場面ごとにループ再生)
 const BGM_PATHS = {
@@ -493,8 +500,8 @@ const PREP_NOTICE = {
 
 // 行は文字列(地の文)または {name, text}(セリフ。名前プレートを表示)
 const NOVEL_INTRO = [
-  "時は平安の終わりごろ。都でいちばんの力を持っていたのが、後白河上皇(ごしらかわじょうこう)というお方です。……ところがこの上皇さま、長いあいだ、それはひどい頭痛に悩まされていました。",
-  { name: "後白河上皇", text: "ううむ……今日も頭が割れるように痛い……。薬も、祈祷も、なにも効かぬ……" },
+  { face: "pain", text: "時は平安の終わりごろ。都でいちばんの力を持っていたのが、後白河上皇(ごしらかわじょうこう)というお方です。……ところがこの上皇さま、長いあいだ、それはひどい頭痛に悩まされていました。" },
+  { name: "後白河上皇", face: "pain", text: "ううむ……今日も頭が割れるように痛い……。薬も、祈祷も、なにも効かぬ……" },
   "そんなある夜のこと。上皇さまの夢枕に、お告げが下ります。",
   "——『そなたの前世は、熊野の僧・蓮華坊(れんげぼう)。その髑髏(されこうべ)が今も川の底に沈み、そこから柳の木が生えておる。風が吹くたび柳が揺れて、髑髏に触れる。……それが、その頭痛の正体じゃ』",
   { name: "後白河上皇", text: "なんと……! では、その髑髏を引き上げて、ねんごろに供養せねば……!" },
@@ -581,6 +588,12 @@ function applyImages() {
     document.getElementById("busshi-img").src = IMAGE_PATHS.busshi;
     document.getElementById("screen-craft").classList.add("has-busshi");
   }
+  if (IMAGE_PATHS.kannonPlayer) {
+    const img = document.getElementById("ending-statue-img");
+    img.src = IMAGE_PATHS.kannonPlayer;
+    img.style.display = "block";
+    document.getElementById("ending-statue-emoji").style.display = "none";
+  }
   if (IMAGE_PATHS.hallBg) {
     const bg = document.getElementById("hall-bg-img");
     bg.style.backgroundImage = `url("${IMAGE_PATHS.hallBg}")`;
@@ -590,6 +603,19 @@ function applyImages() {
     document.getElementById("chuson-img").src = IMAGE_PATHS.chuson;
     document.getElementById("chuson").classList.add("has-image");
   }
+  // 運搬パートのキャンバス描画用スプライトを先読み
+  loadSprite("kannonPlayer");
+  loadSprite("kannonBg");
+}
+
+// キャンバス描画用スプライト(読み込み完了したものだけ使い、未設定なら図形描画にフォールバック)
+const sprites = {};
+function loadSprite(key) {
+  const src = IMAGE_PATHS[key];
+  if (!src) return;
+  const img = new Image();
+  img.onload = () => { sprites[key] = img; };
+  img.src = src;
 }
 
 /* ================================================================
@@ -613,13 +639,18 @@ const novel = {
     this.render();
   },
   render() {
-    // 行は文字列(地の文)または {name, text}(セリフ)
+    // 行は文字列(地の文)または {name, text, face}(セリフ・表情差分)
     const line = this.lines[this.index];
     const name = typeof line === "object" ? line.name : "";
+    const face = (typeof line === "object" && line.face) || "";
     $("novel-name").textContent = name;
     $("novel-name").style.display = name ? "inline-block" : "none";
     $("novel-text").textContent = typeof line === "object" ? line.text : line;
     $("novel-portrait").classList.toggle("speaking", name === "後白河上皇");
+    // 表情差分: face:"pain" の行だけ頭痛の立ち絵に
+    if (IMAGE_PATHS.emperor && IMAGE_PATHS.emperorPain) {
+      $("emperor-img").src = face === "pain" ? IMAGE_PATHS.emperorPain : IMAGE_PATHS.emperor;
+    }
   },
   advance() {
     if (!this.active) return;
@@ -1054,14 +1085,27 @@ function renderGame() {
   /* 奥の千体観音(パララックス0.3で流れる金色の列) */
   const far = state.dist * 0.3;
   ctx.save();
-  for (let i = -1; i < 16; i++) {
-    const x = ((i * 68 - far % 68) + 68) % (W + 68) - 34;
-    const gy = 335;
-    ctx.fillStyle = "rgba(217,180,91,0.16)";
-    ctx.beginPath(); ctx.arc(x, gy - 26, 13, 0, Math.PI * 2); ctx.fill(); // 光背
-    ctx.fillStyle = "rgba(160,128,60,0.30)";
-    ctx.beginPath(); ctx.arc(x, gy - 26, 5, 0, Math.PI * 2); ctx.fill();  // 頭
-    ctx.fillRect(x - 7, gy - 22, 14, 34);                                  // 体
+  const bgSp = sprites.kannonBg;
+  if (bgSp) {
+    // スプライト版: 立ち姿を等間隔に並べる
+    const bh = 104, bw = bh * bgSp.width / bgSp.height;
+    const gap = 84;
+    ctx.globalAlpha = 0.5;
+    for (let i = -1; i < Math.ceil(W / gap) + 1; i++) {
+      const x = ((i * gap - far % gap) + gap) % (W + gap) - gap / 2;
+      ctx.drawImage(bgSp, x - bw / 2, 372 - bh, bw, bh);
+    }
+  } else {
+    // フォールバック: 図形で簡易表現
+    for (let i = -1; i < 16; i++) {
+      const x = ((i * 68 - far % 68) + 68) % (W + 68) - 34;
+      const gy = 335;
+      ctx.fillStyle = "rgba(217,180,91,0.16)";
+      ctx.beginPath(); ctx.arc(x, gy - 26, 13, 0, Math.PI * 2); ctx.fill(); // 光背
+      ctx.fillStyle = "rgba(160,128,60,0.30)";
+      ctx.beginPath(); ctx.arc(x, gy - 26, 5, 0, Math.PI * 2); ctx.fill();  // 頭
+      ctx.fillRect(x - 7, gy - 22, 14, 34);                                  // 体
+    }
   }
   ctx.restore();
 
@@ -1150,19 +1194,30 @@ function drawStatue(ctx, x, y) {
   ctx.save();
   ctx.translate(x, y);
 
+  // 足元のやわらかな光(浮かんで運ばれているイメージ)
+  const foot = ctx.createRadialGradient(0, 48, 2, 0, 48, 40);
+  foot.addColorStop(0, "rgba(255,226,150,0.35)");
+  foot.addColorStop(1, "rgba(255,226,150,0)");
+  ctx.fillStyle = foot;
+  ctx.beginPath(); ctx.ellipse(0, 48, 40, 12, 0, 0, Math.PI * 2); ctx.fill();
+
+  const sp = sprites.kannonPlayer;
+  if (sp) {
+    // スプライト版(自前の後光付きなのでそのまま描く)
+    const sh = 112, sw = sh * sp.width / sp.height;
+    ctx.drawImage(sp, -sw / 2, -sh * 0.58, sw, sh);
+    drawCracks(ctx);
+    ctx.restore();
+    return;
+  }
+
+  // ---- フォールバック: 図形で簡易表現 ----
   // 光背(後光)
   const halo = ctx.createRadialGradient(0, -26, 4, 0, -26, 44);
   halo.addColorStop(0, "rgba(255,226,150,0.75)");
   halo.addColorStop(1, "rgba(255,226,150,0)");
   ctx.fillStyle = halo;
   ctx.beginPath(); ctx.arc(0, -26, 44, 0, Math.PI * 2); ctx.fill();
-
-  // 足元のやわらかな光(浮かんで運ばれているイメージ)
-  const foot = ctx.createRadialGradient(0, 30, 2, 0, 30, 30);
-  foot.addColorStop(0, "rgba(255,226,150,0.35)");
-  foot.addColorStop(1, "rgba(255,226,150,0)");
-  ctx.fillStyle = foot;
-  ctx.beginPath(); ctx.ellipse(0, 30, 30, 10, 0, 0, Math.PI * 2); ctx.fill();
 
   // 体(金色)
   const body = ctx.createLinearGradient(0, -20, 0, 26);
@@ -1193,7 +1248,12 @@ function drawStatue(ctx, x, y) {
   ctx.beginPath(); ctx.moveTo(-5, -27); ctx.quadraticCurveTo(-3, -25.4, -1.2, -27); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(1.2, -27); ctx.quadraticCurveTo(3, -25.4, 5, -27); ctx.stroke();
 
-  // ヒビ(現在のダメージ段階ぶん描く)
+  drawCracks(ctx);
+  ctx.restore();
+}
+
+// ヒビ(現在のダメージ段階ぶん、像の上に描く)
+function drawCracks(ctx) {
   const stage = Math.floor(state.damage / GAME.CRACK_STEP);
   ctx.strokeStyle = "rgba(40,22,8,0.9)";
   ctx.lineWidth = 1.6;
@@ -1210,7 +1270,6 @@ function drawStatue(ctx, x, y) {
     }
     ctx.stroke();
   }
-  ctx.restore();
 }
 
 // HUD(進行度・ダメージゲージ・傾き)
