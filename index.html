@@ -17,13 +17,16 @@
      (キーボードモードのみ確認する場合は file:// でも動作します)
 
 ■ カメラ検出の精度に影響する環境要因(展示前に必ず確認)
+  - 検出方式: 粘土(観音さま)そのものの色を1点追跡し、上下位置のみを読み取ります。
+    傾きの検出はありません。
+  - 粘土の色: 白い紙粘土のままでも動作します(白っぽい色は明るさベースで判定)が、
+    白い壁・白い服の前では誤検出しやすくなります。背景に濃い色の布を垂らすか、
+    粘土に色を付けると安定します。
   - 照明: 明るく均一な照明が理想。逆光・強い西日・色付き照明(暖色電球のみ等)は
-    色相がずれて検出が不安定になります。白色光を推奨。
-  - シールの色: 左=ピンク系 / 右=グリーン系。彩度の高い(蛍光色に近い)シールほど
-    背景と分離しやすく安定します。1枚あたり3cm角以上を推奨。
-  - 背景: カメラに映る背景に、シールと同系色(ピンク・緑)の物や服があると誤検出します。
+    検出が不安定になります。白色光を推奨。
+  - 背景: カメラに映る背景に、粘土と似た色の物や服があると誤検出します。
     プレイヤーの服・壁・ポスター等を事前に確認してください。
-  - 距離: カメラから台紙まで 50cm〜1m 程度。近すぎるとシールが画面外に出やすく、
+  - 距離: カメラから粘土まで 50cm〜1m 程度。近すぎると画面外に出やすく、
     遠すぎると検出画素数が足りずロストしやすくなります。
   - 照明が変わったら: フェーズ3冒頭のキャリブレーション画面で色を登録し直し、
     「色の許容しきい値」スライダーで調整してください。
@@ -262,8 +265,8 @@
       <button class="btn sub" id="btn-start-keyboard">キーボードモードではじめる</button>
     </div>
     <p class="note">
-      用意するもの:紙粘土/台紙(板や厚紙)/色シール2枚(ピンク系・グリーン系)/Webカメラ<br>
-      1〜2人用。キーボードモードは、カメラが使えないときの確認用です。
+      用意するものは、紙粘土とWebカメラだけ。1〜2人で遊べます。<br>
+      キーボードモードは、カメラが使えないときの確認用です。
     </p>
   </section>
 
@@ -283,7 +286,7 @@
   <!-- ============ 願い事入力 ============ -->
   <section id="screen-wish" class="screen">
     <div class="wish-box">
-      <p>奉納の前に。<br>あなたたちの願い事をひとつ、観音さまにお伝えください。</p>
+      <p>奉納の前に、ひとつだけ。<br>あなたたちの願い事を、観音さまに伝えておきましょう。</p>
       <input id="wish-input" type="text" maxlength="40" placeholder="ここに願い事を書いてください">
       <br>
       <button class="btn" id="btn-wish-ok" disabled>観音さまに伝える</button>
@@ -292,22 +295,18 @@
 
   <!-- ============ キャリブレーション ============ -->
   <section id="screen-calib" class="screen">
-    <h2>― 準備:シールの色を教えてください ―</h2>
+    <h2>― 準備:観音さまの色を、カメラに教えてあげましょう ―</h2>
     <div class="calib-wrap">
       <canvas id="calib-canvas" width="480" height="360"></canvas>
       <div class="calib-panel">
-        <p>台紙をカメラに向けて構え、下のボタンを押してから、<b>映像の中のシール</b>をクリックしてください。</p>
+        <p>観音さまを手に持って、カメラに向けてください。下のボタンを押してから、<b>映像の中の観音さま(粘土)</b>をクリック。</p>
         <div class="pickrow">
-          <div class="swatch" id="swatch-pink"></div>
-          <button class="btn sub" id="btn-pick-pink">左のシール(ピンク系)を登録</button>
-        </div>
-        <div class="pickrow">
-          <div class="swatch" id="swatch-green"></div>
-          <button class="btn sub" id="btn-pick-green">右のシール(グリーン系)を登録</button>
+          <div class="swatch" id="swatch-clay"></div>
+          <button class="btn sub" id="btn-pick-clay">観音さま(粘土)の色を登録</button>
         </div>
         <p style="margin-top:14px;">色の許容しきい値:<span id="tol-value"></span></p>
         <input type="range" id="tol-slider" min="10" max="55" step="1">
-        <p class="calib-hint">検出が不安定なら広く、背景を拾ってしまうなら狭く調整します。○印がシールに安定して付けばOKです。</p>
+        <p class="calib-hint">○印が観音さまに安定して付けばOK。うまくいかないときは、しきい値を広げるか、背景に濃い色の布などを置いてみてください。</p>
         <p id="calib-status"></p>
         <button class="btn" id="btn-calib-done" disabled>準備完了 ― お堂へ</button>
       </div>
@@ -327,7 +326,7 @@
         <p style="color:var(--gold); letter-spacing:.3em; margin-bottom:14px;">― 奉納の道 ―</p>
         <p>金色に光る「光の道」に沿って、観音さまをお堂の最奥までお運びください。</p>
         <p id="intro-controls" style="font-size:14px; color:#d8c9a8; margin-top:10px;"></p>
-        <p style="font-size:14px; color:#d8c9a8;">道から外れたり、台紙が15度以上傾くと、観音さまにヒビが入ります。</p>
+        <p style="font-size:14px; color:#d8c9a8;">光の道から外れると、観音さまにヒビが入ってしまいます。あわてず、ゆっくり。</p>
         <br>
         <button class="btn" id="btn-game-start">お運びを始める</button>
       </div>
@@ -338,7 +337,7 @@
       <div class="panel">
         <p style="font-size:20px; letter-spacing:.2em;">深呼吸して、姿勢を整えましょう</p>
         <div class="breath-circle"></div>
-        <p style="font-size:14px; color:#d8c9a8;">観音さまは、待っていてくれます。<br>台紙を持ち直したら、ゆっくり再開しましょう。</p>
+        <p style="font-size:14px; color:#d8c9a8;">だいじょうぶ、観音さまは待っていてくれます。<br>持ち直したら、ゆっくり再開しましょう。</p>
         <br>
         <button class="btn" id="btn-rest-resume">再開する</button>
       </div>
@@ -403,7 +402,6 @@ const BGM_PATHS = {
 // 効果音
 const SE_PATHS = {
   crack: "",  // ヒビが入った時
-  warn:  "",  // 傾き警告
   goal:  "",  // 奉納の瞬間
 };
 
@@ -415,9 +413,10 @@ const DETECT = {
   PROC_H: 120,          // 解析用キャンバスの高さ
   SCAN_STEP: 2,         // ピクセル走査の間引き(2 = 1つ飛ばし)
   HUE_TOL_DEFAULT: 28,  // 色相の許容範囲(度)スライダー初期値
-  SAT_MIN: 0.22,        // これ未満の彩度は無彩色として無視
+  SAT_MIN: 0.22,        // これ未満の彩度は無彩色として無視(色付き粘土の判定時)
   VAL_MIN: 0.18,        // これ未満の明度は暗すぎとして無視
   SAT_TOL: 0.5,         // 登録色との彩度差の許容
+  ACHROMA_SAT: 0.3,     // 登録色の彩度がこれ未満なら「白っぽい粘土」モードで判定
   SMOOTH: 0.35,         // スムージング係数(EMA。大きいほど追従が速い)
   MIN_PIXELS: 5,        // 検出画素がこれ未満ならロスト扱い
 };
@@ -431,17 +430,13 @@ const GAME = {
   ACCEL: 260,             // →キーの加速(px/s^2)
   BRAKE: 520,             // ←キーの減速(px/s^2)
   FRICTION: 150,          // キーを離した時の自然減速(px/s^2)
-  TILT_LIMIT: 15,         // 傾き警告のしきい値(度)
   PATH_HALF: 58,          // 光の道の半幅(px)
-  DAMAGE_PATH: 16,        // 道から外れている間のダメージ(%/s)
-  DAMAGE_TILT: 14,        // 傾きすぎている間のダメージ(%/s)
+  DAMAGE_PATH: 20,        // 道から外れている間のダメージ(%/s)
   DAMAGE_MAX: 100,        // ゲージ最大
   CRACK_STEP: 20,         // ヒビが1本増えるダメージ間隔(%)
   EVENT1_AT: 0.5,         // イベント1の発動位置(進行率)
   EVENT2_AT: 0.85,        // イベント2の発動位置(進行率)
   KB_Y_SPEED: 230,        // キーボードモード: 上下速度(px/s)
-  KB_TILT_SPEED: 45,      // キーボードモード: 傾き速度(度/s)
-  KB_TILT_RETURN: 12,     // キーボードモード: 傾きの自動復元(度/s)
   Y_MIN: 130, Y_MAX: 470, // 観音さまの可動範囲(画面px)
 };
 
@@ -450,25 +445,25 @@ const GAME = {
    ================================================================ */
 const CRAFT_STEPS = [
   { title: "芯を作る", icon: "🏔️",
-    inst: "まずは胴体になる芯を作りましょう。粘土を細長い山のような形に。",
-    trivia: "『三十三間堂の千体観音は「寄木造(よせぎづくり)」。一本の木からではなく、複数の木材を組み合わせて作られました。分業で速く、美しく。平安の仏師たちのチームワークの結晶です。』" },
+    inst: "さあ、まずは胴体の芯から。粘土を、細長い山みたいな形にしてみましょう。",
+    trivia: "ところで——三十三間堂の千体観音は「寄木造(よせぎづくり)」といってね。一本の木からではなく、いくつもの木材を組み合わせて作られたんです。分業で、速く、美しく。平安の仏師たちの、チームワークの結晶というわけです。" },
   { title: "頭を作る", icon: "⚪",
-    inst: "小さな玉を作って、そっと胴体に乗せましょう。",
-    trivia: "『千手観音の頭の上には、さらに11の小さなお顔(十一面)が乗っています。あらゆる方向の人々を見守るためと言われています。』" },
+    inst: "次は頭です。小さな玉を作って、そっと胴体に乗せてあげてください。……そう、そーっと。",
+    trivia: "千手観音の頭の上にはね、さらに11の小さなお顔(十一面)が乗っているんですよ。あらゆる方向の人々を見守るため——そう言われています。" },
   { title: "手を添える", icon: "🙌",
-    inst: "細く伸ばした粘土を、体の左右に添えましょう。",
-    trivia: "『「千手」観音といっても実際の腕は42本。2本を除いた40本が、それぞれ25の世界を救うので 40×25=1000。数え方にも祈りが込められています。』" },
+    inst: "細く伸ばした粘土を、体の左右にそっと添えて。これが観音さまの手になります。",
+    trivia: "「千手」観音といっても、実際の腕は42本。2本を除いた40本が、それぞれ25の世界を救うから 40×25=1000。……数え方にも、祈りが込められているんですね。" },
   { title: "顔を整える", icon: "☺️",
-    inst: "表情は自由です。あなたの大切な人を思い浮かべて。",
-    trivia: "『千体の観音像は、一体一体すべて顔が違います。「会いたい人に似た顔が必ず見つかる」と昔から言われてきました。』" },
+    inst: "顔を整えましょう。表情は自由です。あなたの大切な人を、思い浮かべながら。",
+    trivia: "千体の観音像はね、一体一体、すべて顔が違うんです。「会いたい人に似た顔が、必ず見つかる」——昔から、そう言われてきました。" },
   { title: "完成", icon: "🪷",
-    inst: "これで、あなたたちだけの観音さまが生まれました。三十三間堂の千体に続く、千一体目です。",
-    trivia: "『次はこの観音さまを、お堂の最奥までお運びします。ここから先は、二人(あるいは一人二役)の力の見せどころです。』" },
+    inst: "……できましたね。あなたたちだけの観音さまが、いま生まれました。三十三間堂の千体に続く、千一体目です。",
+    trivia: "ここからは、この観音さまをお堂の最奥までお運びする大仕事。二人なら力を合わせて、一人なら一人二役で。……ふふ、頼みましたよ。" },
 ];
 const PREP_NOTICE = {
-  title: "運搬のご準備", icon: "📋",
-  inst: "台紙(板や厚紙)の左右の端に、目印の色シールを2枚貼ってください(左:ピンク系 / 右:グリーン系)",
-  trivia: "『できあがった観音さまを台紙の真ん中にそっと乗せましょう。このシールをカメラが追いかけて、画面の中の観音さまが動きます。』",
+  title: "運搬のごあんない", icon: "🤲",
+  inst: "できあがった観音さまを、そっと手に取ってください。カメラの前で上下に動かすと、画面の中の観音さまも、いっしょに動きます。",
+  trivia: "粘土が白っぽいときは、カメラに映る背景を濃い色にしておくと見つけやすくなりますよ。次の画面で、観音さまの色をカメラに教えてあげてくださいね。",
 };
 
 const NOVEL_INTRO = [
@@ -510,7 +505,6 @@ const state = {
   dist: 0,                // 進行距離(ワールドpx)
   speed: 0,               // 現在速度
   y: 300,                 // 観音さまの画面Y
-  tilt: 0,                // 傾き(度)
   damage: 0,              // ダメージゲージ(0-100)
   crackCount: 0,          // 累計ヒビ数(リザルト用)
   crackStageMax: 0,       // 現ゲージ内で到達したヒビ段階
@@ -664,11 +658,9 @@ const cam = {
   procCtx: null,
   ready: false,
   hueTol: DETECT.HUE_TOL_DEFAULT,
-  refPink: null,        // 登録色 {h,s,v}
-  refGreen: null,
+  refClay: null,        // 登録色 {h,s,v}
   // 検出結果(鏡像座標系 / 解析キャンバス基準)
-  pink:  { x: 0, y: 0, found: false, sx: 0, sy: 0, has: false },
-  green: { x: 0, y: 0, found: false, sx: 0, sy: 0, has: false },
+  clay: { x: 0, y: 0, found: false, has: false },
 };
 
 async function initCamera() {
@@ -711,6 +703,11 @@ function rgb2hsv(r, g, b) {
 // 登録色とのマッチ判定(HSVベースで照明変化に強く)
 function matchColor(r, g, b, ref) {
   const [h, s, v] = rgb2hsv(r, g, b);
+  if (ref.s < DETECT.ACHROMA_SAT) {
+    // 白っぽい粘土: 色相が当てにならないので「彩度が低く、明るさが近い」で判定
+    // しきい値スライダーは明るさの許容幅として効く(28 → 約±0.2)
+    return s < DETECT.ACHROMA_SAT + 0.1 && Math.abs(v - ref.v) < cam.hueTol / 140;
+  }
   if (s < DETECT.SAT_MIN || v < DETECT.VAL_MIN) return false;
   let dh = Math.abs(h - ref.h);
   if (dh > 180) dh = 360 - dh;   // 色相は円環なので短い方の距離
@@ -727,49 +724,41 @@ function grabFrame() {
   return ctx.getImageData(0, 0, DETECT.PROC_W, DETECT.PROC_H);
 }
 
-// 2色を間引き走査で検出し、重心をスムージングして更新
+// 粘土の色を間引き走査で検出し、重心をスムージングして更新
 function detectMarkers() {
-  if (!cam.ready) return;
+  if (!cam.ready || !cam.refClay) return;
   const img = grabFrame();
   const data = img.data;
   const step = DETECT.SCAN_STEP;
-  const acc = {
-    pink:  { sx: 0, sy: 0, n: 0 },
-    green: { sx: 0, sy: 0, n: 0 },
-  };
+  let sx = 0, sy = 0, n = 0;
   for (let y = 0; y < DETECT.PROC_H; y += step) {
     for (let x = 0; x < DETECT.PROC_W; x += step) {
       const i = (y * DETECT.PROC_W + x) * 4;
-      const r = data[i], g = data[i + 1], b = data[i + 2];
-      if (cam.refPink && matchColor(r, g, b, cam.refPink)) {
-        acc.pink.sx += x; acc.pink.sy += y; acc.pink.n++;
-      } else if (cam.refGreen && matchColor(r, g, b, cam.refGreen)) {
-        acc.green.sx += x; acc.green.sy += y; acc.green.n++;
+      if (matchColor(data[i], data[i + 1], data[i + 2], cam.refClay)) {
+        sx += x; sy += y; n++;
       }
     }
   }
-  for (const key of ["pink", "green"]) {
-    const a = acc[key], m = cam[key];
-    if (a.n >= DETECT.MIN_PIXELS) {
-      const cx = a.sx / a.n, cy = a.sy / a.n;
-      if (m.has) {
-        // 移動平均(EMA)でジッターを抑える
-        m.x += (cx - m.x) * DETECT.SMOOTH;
-        m.y += (cy - m.y) * DETECT.SMOOTH;
-      } else {
-        m.x = cx; m.y = cy; m.has = true;
-      }
-      m.found = true;
+  const m = cam.clay;
+  if (n >= DETECT.MIN_PIXELS) {
+    const cx = sx / n, cy = sy / n;
+    if (m.has) {
+      // 移動平均(EMA)でジッターを抑える
+      m.x += (cx - m.x) * DETECT.SMOOTH;
+      m.y += (cy - m.y) * DETECT.SMOOTH;
     } else {
-      m.found = false;
+      m.x = cx; m.y = cy; m.has = true;
     }
+    m.found = true;
+  } else {
+    m.found = false;
   }
 }
 
 /* ================================================================
    キャリブレーション画面
    ================================================================ */
-let pickTarget = null; // "pink" | "green" | null
+let picking = false; // 色登録の待機中か
 const calibCanvas = $("calib-canvas");
 const calibCtx = calibCanvas.getContext("2d");
 
@@ -788,11 +777,10 @@ $("tol-slider").addEventListener("input", (e) => {
   cam.hueTol = Number(e.target.value);
   $("tol-value").textContent = e.target.value;
 });
-$("btn-pick-pink").addEventListener("click", () => { pickTarget = "pink"; updateCalibStatus(); });
-$("btn-pick-green").addEventListener("click", () => { pickTarget = "green"; updateCalibStatus(); });
+$("btn-pick-clay").addEventListener("click", () => { picking = true; updateCalibStatus(); });
 
 calibCanvas.addEventListener("click", (e) => {
-  if (!pickTarget || !cam.ready) return;
+  if (!picking || !cam.ready) return;
   // クリック位置 → 解析キャンバス座標(どちらも鏡像描画なのでそのまま比例変換)
   const rect = calibCanvas.getBoundingClientRect();
   const px = Math.round((e.clientX - rect.left) / rect.width * DETECT.PROC_W);
@@ -809,20 +797,19 @@ calibCanvas.addEventListener("click", (e) => {
     }
   }
   const [h, s, v] = rgb2hsv(sr / n, sg / n, sb / n);
-  const ref = { h, s, v, rgb: `rgb(${Math.round(sr/n)},${Math.round(sg/n)},${Math.round(sb/n)})` };
-  if (pickTarget === "pink") cam.refPink = ref; else cam.refGreen = ref;
-  $("swatch-" + pickTarget).style.background = ref.rgb;
-  pickTarget = null;
+  cam.refClay = { h, s, v };
+  cam.clay.has = false;   // スムージングを初期化
+  $("swatch-clay").style.background = `rgb(${Math.round(sr/n)},${Math.round(sg/n)},${Math.round(sb/n)})`;
+  picking = false;
   updateCalibStatus();
 });
 
 function updateCalibStatus() {
   const st = $("calib-status");
-  if (pickTarget === "pink") st.textContent = "映像の中の「ピンクのシール」をクリックしてください";
-  else if (pickTarget === "green") st.textContent = "映像の中の「グリーンのシール」をクリックしてください";
-  else if (!cam.refPink || !cam.refGreen) st.textContent = "2色とも登録すると出発できます";
-  else st.textContent = "登録OK。○印がシールに付いているか確かめてください";
-  $("btn-calib-done").disabled = !(cam.refPink && cam.refGreen);
+  if (picking) st.textContent = "映像の中の観音さま(粘土)をクリック!";
+  else if (!cam.refClay) st.textContent = "色をひとつ登録すると、出発できます";
+  else st.textContent = "登録OK。○印が観音さまに付いていれば、準備完了です";
+  $("btn-calib-done").disabled = !cam.refClay;
 }
 $("btn-calib-done").addEventListener("click", () => startGame());
 
@@ -840,16 +827,13 @@ function renderCalib() {
 
 // 検出マーカーの○印を描く(解析座標 → 任意キャンバス座標)
 function drawMarkerRings(ctx, w, h) {
+  if (!cam.refClay || !cam.clay.found) return;
   const sx = w / DETECT.PROC_W, sy = h / DETECT.PROC_H;
-  for (const [key, color] of [["pink", "#ff5fa0"], ["green", "#4fe07a"]]) {
-    const m = cam[key];
-    if (!cam["ref" + (key === "pink" ? "Pink" : "Green")] || !m.found) continue;
-    ctx.beginPath();
-    ctx.arc(m.x * sx, m.y * sy, Math.max(8, w * 0.03), 0, Math.PI * 2);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    ctx.stroke();
-  }
+  ctx.beginPath();
+  ctx.arc(cam.clay.x * sx, cam.clay.y * sy, Math.max(10, w * 0.04), 0, Math.PI * 2);
+  ctx.strokeStyle = "#ffd98a";
+  ctx.lineWidth = 3;
+  ctx.stroke();
 }
 
 /* ================================================================
@@ -873,7 +857,7 @@ function startGame() {
   state.scene = "game";
   state.phase = "intro";
   state.dist = 0; state.speed = 0;
-  state.y = pathY(STATUE_X); state.tilt = 0;
+  state.y = pathY(STATUE_X);
   state.damage = 0; state.crackCount = 0; state.crackStageMax = 0;
   state.playTime = 0;
   state.event1Done = false; state.event2Done = false;
@@ -882,8 +866,8 @@ function startGame() {
   setBgm("transport");
   camOverlay.style.display = state.kbMode ? "none" : "block";
   $("intro-controls").innerHTML = state.kbMode
-    ? "W / S:上下 A / D:傾き ← / →:進む・止まる"
-    : "粘土係:台紙の上下と傾きで観音さまを導く<br>キーボード係:← / →キーで進む速さを決める(1人のときは左手に台紙・右手にキーボード)";
+    ? "W / S:上下 ← / →:進む・止まる"
+    : "粘土係:観音さまを手に持って、カメラの前で上下にそっと動かす<br>キーボード係:← / →キーで進む速さを決める(1人のときは左手に観音さま・右手にキーボード)";
   $("overlay-intro").classList.add("active");
   $("overlay-rest").classList.remove("active");
 }
@@ -914,34 +898,21 @@ function updateGame(dt) {
   if (state.phase !== "play") return;
   state.playTime += dt;
 
-  /* --- 上下・傾きの入力 --- */
+  /* --- 上下の入力 --- */
   if (state.kbMode) {
-    // キーボードモード: W/S 上下、A/D 傾き
+    // キーボードモード: W/S で上下のみ
     if (state.keys["w"]) state.y -= GAME.KB_Y_SPEED * dt;
     if (state.keys["s"]) state.y += GAME.KB_Y_SPEED * dt;
-    if (state.keys["a"]) state.tilt -= GAME.KB_TILT_SPEED * dt;
-    else if (state.keys["d"]) state.tilt += GAME.KB_TILT_SPEED * dt;
-    else {
-      // 何も押していなければ傾きはゆっくり水平へ戻る
-      const back = GAME.KB_TILT_RETURN * dt;
-      if (Math.abs(state.tilt) <= back) state.tilt = 0;
-      else state.tilt -= Math.sign(state.tilt) * back;
-    }
-    state.tilt = Math.max(-45, Math.min(45, state.tilt));
     state.lost = false;
   } else {
     detectMarkers();
-    const p = cam.pink, g = cam.green;
-    state.lost = !(p.found && g.found);
+    state.lost = !cam.clay.found;
     if (!state.lost) {
-      // 2点の中点Y → 観音さまの上下位置
-      const midY = (p.y + g.y) / 2 / DETECT.PROC_H;              // 0..1
-      state.y = GAME.Y_MIN + midY * (GAME.Y_MAX - GAME.Y_MIN);
-      // 2点を結ぶ直線の角度 → 傾き(鏡像座標系で計算済みなので見た目と一致)
-      const ang = Math.atan2(g.y - p.y, g.x - p.x) * 180 / Math.PI;
-      state.tilt = Math.max(-90, Math.min(90, ang));
+      // 粘土の重心Y → 観音さまの上下位置
+      const clayY = cam.clay.y / DETECT.PROC_H;                  // 0..1
+      state.y = GAME.Y_MIN + clayY * (GAME.Y_MAX - GAME.Y_MIN);
     }
-    // ロスト時は y / tilt を凍結(誤動作で落とさない)
+    // ロスト時は y を凍結(誤動作で落とさない)
   }
   state.y = Math.max(GAME.Y_MIN, Math.min(GAME.Y_MAX, state.y));
 
@@ -958,12 +929,11 @@ function updateGame(dt) {
   }
   state.dist += state.speed * dt;
 
-  /* --- ダメージ判定 --- */
+  /* --- ダメージ判定(光の道から外れている間だけ) --- */
   const safeY = pathY(state.dist + STATUE_X);
   const offPath = Math.abs(state.y - safeY) > GAME.PATH_HALF;
-  const tilted = Math.abs(state.tilt) > GAME.TILT_LIMIT;
-  if (!state.lost && (offPath || tilted)) {
-    state.damage += ((offPath ? GAME.DAMAGE_PATH : 0) + (tilted ? GAME.DAMAGE_TILT : 0)) * dt;
+  if (!state.lost && offPath) {
+    state.damage += GAME.DAMAGE_PATH * dt;
     state.damage = Math.min(GAME.DAMAGE_MAX, state.damage);
     // ヒビの段階が進んだらカウント
     const stage = Math.floor(state.damage / GAME.CRACK_STEP);
@@ -977,13 +947,10 @@ function updateGame(dt) {
   /* --- 警告表示 --- */
   const warn = $("game-warning");
   if (state.lost) {
-    warn.textContent = "シールを見失いました ― 台紙をカメラに向けてください";
-    warn.style.display = "block";
-  } else if (tilted) {
-    warn.textContent = "危ない! 傾いています!";
+    warn.textContent = "観音さまを見失いました…… カメラに見せてあげてください";
     warn.style.display = "block";
   } else if (offPath) {
-    warn.textContent = "光の道から外れています……";
+    warn.textContent = "道から外れています……!";
     warn.style.display = "block";
   } else {
     warn.style.display = "none";
@@ -1117,7 +1084,7 @@ function renderGame() {
   }
 
   /* 運搬中の観音さま */
-  drawStatue(ctx, STATUE_X, state.y, state.tilt * Math.PI / 180);
+  drawStatue(ctx, STATUE_X, state.y);
 
   /* HUD */
   drawHud(ctx);
@@ -1137,11 +1104,10 @@ function renderGame() {
   }
 }
 
-// 観音さま(台紙に乗った像)を描く
-function drawStatue(ctx, x, y, rad) {
+// 運搬中の観音さまを描く
+function drawStatue(ctx, x, y) {
   ctx.save();
   ctx.translate(x, y);
-  ctx.rotate(rad);
 
   // 光背(後光)
   const halo = ctx.createRadialGradient(0, -26, 4, 0, -26, 44);
@@ -1150,14 +1116,12 @@ function drawStatue(ctx, x, y, rad) {
   ctx.fillStyle = halo;
   ctx.beginPath(); ctx.arc(0, -26, 44, 0, Math.PI * 2); ctx.fill();
 
-  // 台紙
-  ctx.fillStyle = "#8a6b45";
-  ctx.fillRect(-56, 26, 112, 9);
-  // 目印シール(左ピンク・右グリーン)
-  ctx.fillStyle = "#ff5fa0";
-  ctx.beginPath(); ctx.arc(-48, 30.5, 5, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#4fe07a";
-  ctx.beginPath(); ctx.arc(48, 30.5, 5, 0, Math.PI * 2); ctx.fill();
+  // 足元のやわらかな光(浮かんで運ばれているイメージ)
+  const foot = ctx.createRadialGradient(0, 30, 2, 0, 30, 30);
+  foot.addColorStop(0, "rgba(255,226,150,0.35)");
+  foot.addColorStop(1, "rgba(255,226,150,0)");
+  ctx.fillStyle = foot;
+  ctx.beginPath(); ctx.ellipse(0, 30, 30, 10, 0, 0, Math.PI * 2); ctx.fill();
 
   // 体(金色)
   const body = ctx.createLinearGradient(0, -20, 0, 26);
@@ -1234,17 +1198,6 @@ function drawHud(ctx) {
   ctx.fillRect(24, 40, 120 * dmgRatio, 12);
   ctx.strokeStyle = "rgba(217,180,91,0.5)";
   ctx.strokeRect(24.5, 40.5, 119, 11);
-
-  /* 傾きインジケータ */
-  ctx.fillStyle = "#f0e6d2";
-  ctx.fillText(`傾き ${state.tilt.toFixed(0)}°`, 24, 78);
-  ctx.save();
-  ctx.translate(90, 96);
-  ctx.rotate(state.tilt * Math.PI / 180);
-  ctx.strokeStyle = Math.abs(state.tilt) > GAME.TILT_LIMIT ? "#ff7a5a" : "rgba(217,180,91,0.8)";
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(-26, 0); ctx.lineTo(26, 0); ctx.stroke();
-  ctx.restore();
 
   /* タイム */
   ctx.textAlign = "right";
