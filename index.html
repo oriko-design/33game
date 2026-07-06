@@ -116,8 +116,14 @@
   .craft-step-label { color: var(--gold); font-size: 15px; letter-spacing: .4em; margin-bottom: 6px; }
   .craft-title { font-size: 28px; color: var(--paper); margin-bottom: 18px; letter-spacing: .2em; }
   .craft-inst { font-size: 18px; line-height: 2; margin-bottom: 24px; }
+  .craft-trivia-row { display: flex; gap: 16px; align-items: flex-end; }
+  /* 語り手の仏師の立ち絵(画像パス設定時のみ表示) */
+  .craft-speaker { display: none; flex: none; width: 116px; }
+  .craft-speaker img { width: 100%; display: block; filter: drop-shadow(0 6px 12px rgba(0,0,0,.45)); }
+  .craft-speaker .caption { text-align: center; font-size: 11px; color: var(--gold-dim); letter-spacing: .2em; margin-top: 4px; }
+  .has-busshi .craft-speaker { display: block; }
   .craft-trivia {
-    text-align: left; font-size: 14px; line-height: 2; color: #d8c9a8;
+    flex: 1; text-align: left; font-size: 14px; line-height: 2; color: #d8c9a8;
     background: rgba(0,0,0,.3); border-left: 3px solid var(--gold-dim);
     padding: 14px 18px; border-radius: 0 4px 4px 0;
   }
@@ -277,7 +283,13 @@
       <p class="craft-step-label" id="craft-step-label"></p>
       <h2 class="craft-title" id="craft-title"></h2>
       <p class="craft-inst" id="craft-inst"></p>
-      <div class="craft-trivia" id="craft-trivia"></div>
+      <div class="craft-trivia-row">
+        <div class="craft-speaker">
+          <img id="busshi-img" alt="仏師">
+          <p class="caption">仏師</p>
+        </div>
+        <div class="craft-trivia" id="craft-trivia"></div>
+      </div>
       <p class="craft-progress" id="craft-progress"></p>
       <button class="btn" id="btn-craft-next">次へ</button>
     </div>
@@ -388,6 +400,7 @@
 // 画像: Midjourney 生成画像に差し替え予定
 const IMAGE_PATHS = {
   emperor: "",   // 後白河上皇の立ち絵 (例: "img/emperor.png")
+  busshi:  "",   // 語り手の仏師の立ち絵(制作パート) (例: "img/busshi.png")
   hallBg:  "",   // お堂内部の背景     (例: "img/hall.jpg")
   chuson:  "",   // 中尊・千手観音坐像 (例: "img/chuson.png")
 };
@@ -547,6 +560,10 @@ function applyImages() {
   if (IMAGE_PATHS.emperor) {
     document.getElementById("emperor-img").src = IMAGE_PATHS.emperor;
     document.getElementById("novel-portrait").classList.add("has-image");
+  }
+  if (IMAGE_PATHS.busshi) {
+    document.getElementById("busshi-img").src = IMAGE_PATHS.busshi;
+    document.getElementById("screen-craft").classList.add("has-busshi");
   }
   if (IMAGE_PATHS.hallBg) {
     const bg = document.getElementById("hall-bg-img");
