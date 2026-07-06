@@ -137,6 +137,15 @@
     background: rgba(8,5,3,.72); cursor: pointer;
   }
   #novel.active { display: block; }
+  /* イベント用の背景(指定された時だけ表示。上に薄墨をかけて文字を読みやすく) */
+  #novel .bg {
+    position: absolute; inset: 0; display: none;
+    background-size: cover; background-position: center;
+  }
+  #novel .bg::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(10,6,3,.18) 0%, rgba(10,6,3,.28) 60%, rgba(10,6,3,.6) 100%);
+  }
   #novel .portrait {
     position: absolute; left: 60px; bottom: 175px; width: 260px; height: 330px;
     display: none; align-items: flex-end; justify-content: center;
@@ -256,6 +265,8 @@
   #chuson img { display: none; max-width: 100%; max-height: 100%; object-fit: contain; position: relative; }
   #chuson.has-image .sil { display: none; }
   #chuson.has-image img { display: block; }
+  /* ゴール後背景がある時はシルエットのプレースホルダーを出さない */
+  .has-goalbg #chuson .sil, .has-goalbg #chuson .glow { display: none; }
   #ending-statue { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%) translateY(120px); opacity: 0; font-size: 40px; transition: transform 2.4s ease-out, opacity 2.4s; z-index: 2; }
   #ending-statue img { display: none; height: 96px; filter: drop-shadow(0 4px 14px rgba(255,215,120,.35)); }
   #ending-statue.placed { transform: translateX(-50%) translateY(0); opacity: 1; }
@@ -392,6 +403,7 @@
 
   <!-- ============ ノベル共通オーバーレイ ============ -->
   <div id="novel">
+    <div class="bg" id="novel-bg"></div>
     <div class="portrait" id="novel-portrait">
       <div class="silhouette"></div>
       <img id="emperor-img" alt="後白河上皇">
@@ -415,13 +427,16 @@
    ================================================================ */
 // 画像: Midjourney 生成画像に差し替え予定
 const IMAGE_PATHS = {
-  emperor:      "img/emperor.png",       // 後白河上皇の立ち絵(通常)
-  emperorPain:  "img/emperor_pain.png",  // 後白河上皇の立ち絵(頭痛)
-  busshi:       "img/busshi.png",        // 語り手の仏師の立ち絵(制作パート)
-  kannonPlayer: "img/kannon_player.png", // プレイヤーが動かす観音さま(運搬パート)
-  kannonBg:     "img/kannon_bg.png",     // 背景に立ち並ぶ千体観音(運搬パート)
-  hallBg:       "",                      // お堂内部の背景     (例: "img/hall.jpg")
-  chuson:       "",                      // 中尊・千手観音坐像 (例: "img/chuson.png")
+  emperor:      "img/emperor.png",         // 後白河上皇の立ち絵(通常)
+  emperorPain:  "img/emperor_pain.png",    // 後白河上皇の立ち絵(頭痛)
+  busshi:       "img/busshi.png",          // 語り手の仏師の立ち絵(制作パート)
+  kannonPlayer: "img/kannon_player.png",   // プレイヤーが動かす観音さま(運搬パート)
+  kannonBg:     "img/kannon_bg.png",       // 背景に立ち並ぶ千体観音(運搬パート)
+  eventFujin:   "img/bg_fujin_raijin.jpg", // イベント1「風神・雷神」の背景
+  event28:      "",                        // イベント2「二十八部衆」の背景
+  goalBg:       "",                        // ゴール直後・奉納シーンの背景
+  hallBg:       "",                        // お堂内部の背景     (例: "img/hall.jpg")
+  chuson:       "",                        // 中尊・千手観音坐像 (例: "img/chuson.png")
 };
 // BGM: Suno 生成音源に差し替え予定(場面ごとにループ再生)
 const BGM_PATHS = {
@@ -594,6 +609,15 @@ function applyImages() {
     img.style.display = "block";
     document.getElementById("ending-statue-emoji").style.display = "none";
   }
+  if (IMAGE_PATHS.goalBg) {
+    // ゴール直後・奉納シーンの背景(中尊のプレースホルダーは隠す)
+    const sc = document.getElementById("screen-ending");
+    sc.style.backgroundImage =
+      `linear-gradient(180deg, rgba(10,6,3,.1) 0%, rgba(10,6,3,.25) 55%, rgba(10,6,3,.6) 100%), url("${IMAGE_PATHS.goalBg}")`;
+    sc.style.backgroundSize = "cover";
+    sc.style.backgroundPosition = "center";
+    sc.classList.add("has-goalbg");
+  }
   if (IMAGE_PATHS.hallBg) {
     const bg = document.getElementById("hall-bg-img");
     bg.style.backgroundImage = `url("${IMAGE_PATHS.hallBg}")`;
@@ -635,6 +659,14 @@ const novel = {
   show(lines, opts, onDone) {
     this.lines = lines; this.index = 0; this.onDone = onDone; this.active = true;
     $("novel-portrait").classList.toggle("show", !!(opts && opts.portrait));
+    // イベント背景(opts.bg にパスが指定された時だけ表示)
+    const bg = $("novel-bg");
+    if (opts && opts.bg) {
+      bg.style.backgroundImage = `url("${opts.bg}")`;
+      bg.style.display = "block";
+    } else {
+      bg.style.display = "none";
+    }
     $("novel").classList.add("active");
     this.render();
   },
@@ -1041,12 +1073,12 @@ function updateGame(dt) {
   const progress = state.dist / GAME.GOAL_DIST;
   if (!state.event1Done && progress >= GAME.EVENT1_AT) {
     state.event1Done = true;
-    triggerEvent(NOVEL_EVENT1);
+    triggerEvent(NOVEL_EVENT1, IMAGE_PATHS.eventFujin);
     return;
   }
   if (!state.event2Done && progress >= GAME.EVENT2_AT) {
     state.event2Done = true;
-    triggerEvent(NOVEL_EVENT2);
+    triggerEvent(NOVEL_EVENT2, IMAGE_PATHS.event28);
     return;
   }
 
@@ -1060,12 +1092,12 @@ function updateGame(dt) {
   }
 }
 
-// 道中イベント: 一時停止してノベル表示
-function triggerEvent(lines) {
+// 道中イベント: 一時停止してノベル表示(bg に背景画像パスを渡せる)
+function triggerEvent(lines, bg) {
   state.phase = "event";
   state.speed = 0;
   $("game-warning").style.display = "none";
-  novel.show(lines, {}, () => { state.phase = "play"; });
+  novel.show(lines, { bg: bg || "" }, () => { state.phase = "play"; });
 }
 
 /* ---- 描画 ---- */
