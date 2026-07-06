@@ -68,7 +68,7 @@
   #app {
     position: relative;
     width: 960px; height: 600px;
-    max-width: 100vw; max-height: 100vh;
+    /* 画面サイズへのフィットはJS側で transform: scale() する */
     background: linear-gradient(180deg, #221a12 0%, #171209 100%);
     box-shadow: 0 0 60px rgba(0,0,0,.8), inset 0 0 120px rgba(0,0,0,.5);
     border: 1px solid var(--gold-dim);
@@ -221,7 +221,7 @@
 
   /* ============ 運搬パート ============ */
   #screen-game { cursor: default; }
-  #game-canvas { position: absolute; inset: 0; }
+  #game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   #cam-overlay {
     position: absolute; right: 12px; bottom: 12px; width: 176px; height: 132px;
     border: 1px solid var(--gold-dim); border-radius: 4px; background: #000; z-index: 10;
@@ -368,7 +368,7 @@
         <p style="color:var(--gold); letter-spacing:.3em; margin-bottom:14px;">― 奉納の道 ―</p>
         <p>お堂に浮かぶ金色の輪を、順番にくぐりながら、観音さまを最奥までお運びください。</p>
         <p id="intro-controls" style="font-size:14px; color:#d8c9a8; margin-top:10px;"></p>
-        <p style="font-size:14px; color:#d8c9a8;">輪から外れると、観音さまにヒビが入ってしまいます。あわてず、ゆっくり。<br>視点は ↑↓キー や 画面のドラッグ で見回せます。</p>
+        <p style="font-size:14px; color:#d8c9a8;">輪から外れると、観音さまにヒビが入ってしまいます。あわてず、ゆっくり。</p>
         <br>
         <button class="btn" id="btn-game-start">お運びを始める</button>
       </div>
@@ -605,8 +605,6 @@ const state = {
   speed: 0,               // 現在速度(m/s)
   x: 0,                   // 観音さまの左右位置(m)
   y: 1.2,                 // 観音さまの高さ(m)
-  camYaw: 0,              // カメラの首振り(左右, rad)
-  camPitch: 0,            // カメラの首振り(上下, rad)
   ringIndex: 0,           // 次にくぐる輪の番号
   ringsPassed: 0,         // くぐれた輪の数
   missTimer: 0,           // 輪を外した直後の警告表示タイマー(秒)
@@ -1055,20 +1053,47 @@ function pathY3(z) {
 /* ---- 透視投影 ---- */
 // ワールド座標(x=右+, y=上+, z=奥+) → 画面座標。s は「1mが何pxか」
 function proj(x, y, z, camX, camZ) {
-  // カメラの首振り(ヨー→ピッチの順に回転)を反映
-  let dx = x - camX, dy = y - VIEW.CAM_H, dz = z - camZ;
-  const cy = Math.cos(state.camYaw), sy = Math.sin(state.camYaw);
-  const dx2 = dx * cy - dz * sy;
-  const dzY = dx * sy + dz * cy;
-  const cp = Math.cos(state.camPitch), sp = Math.sin(state.camPitch);
-  const dy2 = dy * cp - dzY * sp;
-  const dz2 = Math.max(0.12, dy * sp + dzY * cp);
-  const s = VIEW.F / dz2;
-  return { x: VIEW.CX + dx2 * s, y: VIEW.CY - dy2 * s, s, dz: dz2 };
+  const dz = Math.max(0.12, z - camZ);
+  const s = VIEW.F / dz;
+  return { x: VIEW.CX + (x - camX) * s, y: VIEW.CY - (y - VIEW.CAM_H) * s, s, dz };
 }
 // フォグ量(0=手前くっきり → 1=奥は闇)
 function fogAt(dz) {
   return Math.min(1, Math.max(0, (dz - VIEW.FOG_NEAR) / (VIEW.FOG_FAR - VIEW.FOG_NEAR)));
+}
+
+/* ---- きらめきパーティクル(輪くぐり成功・←→キーの祝い演出) ---- */
+const sparkles = [];
+function burstSparkles(cx, cyw, cz, n, rad) {
+  for (let i = 0; i < n; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const rr = rad * (0.6 + Math.random() * 0.4);
+    sparkles.push({
+      x: cx + Math.cos(ang) * rr,
+      y: cyw + Math.sin(ang) * rr,
+      z: cz + (Math.random() - 0.5) * 0.25,
+      vx: Math.cos(ang) * (0.25 + Math.random() * 0.45),
+      vy: Math.sin(ang) * (0.25 + Math.random() * 0.45) + 0.3,
+      vz: (Math.random() - 0.5) * 0.25,
+      life: 0, ttl: 0.7 + Math.random() * 0.7,
+      tw: Math.random() * 6.28,
+    });
+  }
+}
+
+/* ---- 空中を漂う金の塵(お堂の雰囲気づくり) ---- */
+const motes = [];
+function initMotes() {
+  motes.length = 0;
+  for (let i = 0; i < 80; i++) {
+    motes.push({
+      x: (Math.random() - 0.5) * 6.6,
+      y: 0.2 + Math.random() * 3.2,
+      z: Math.random() * VIEW.VIEW_DIST,   // カメラからの初期距離(後で絶対座標化)
+      ph: Math.random() * 6.28,
+      sp: 0.4 + Math.random() * 0.8,
+    });
+  }
 }
 
 function startGame() {
@@ -1077,8 +1102,9 @@ function startGame() {
   state.dist = 0; state.speed = 0;
   state.x = pathX3(GAME.STATUE_AHEAD);
   state.y = pathY3(GAME.STATUE_AHEAD);
-  state.camYaw = 0; state.camPitch = 0;
   state.ringIndex = 0; state.ringsPassed = 0;
+  sparkles.length = 0;
+  initMotes();
   state.missTimer = 0; state.effects = [];
   state.damage = 0; state.crackCount = 0; state.crackStageMax = 0;
   state.playTime = 0;
@@ -1088,8 +1114,8 @@ function startGame() {
   setBgm("transport");
   camOverlay.style.display = state.kbMode ? "none" : "block";
   $("intro-controls").innerHTML = state.kbMode
-    ? "W / S:上下 A / D:左右 ← / →:奥へ進む・止まる ↑ / ↓:視点"
-    : "粘土係:観音さまを手に持って、カメラの前で上下・左右にそっと動かす<br>キーボード係:← / →キーで奥へ進む速さを決める(1人のときは左手に観音さま・右手にキーボード)";
+    ? "W / S:上下 A / D:左右 ↑:奥へ進む ↓:止まる ← / →:きらめきを散らす"
+    : "粘土係:観音さまを手に持って、カメラの前で上下・左右にそっと動かす<br>キーボード係:↑キーで奥へ進む・↓で止まる。← →で祝いのきらめき(1人のときは左手に観音さま・右手にキーボード)";
   $("overlay-intro").classList.add("active");
   $("overlay-rest").classList.remove("active");
 }
@@ -1105,24 +1131,20 @@ $("btn-rest-resume").addEventListener("click", () => {
 });
 
 /* ---- 入力 ---- */
-// マウスドラッグでカメラの見回し(離すとゆっくり正面へ戻る)
-let camDragging = false, dragLX = 0, dragLY = 0;
-gameCanvas.addEventListener("pointerdown", (e) => {
-  if (state.scene !== "game" || state.phase !== "play") return;
-  camDragging = true; dragLX = e.clientX; dragLY = e.clientY;
-});
-window.addEventListener("pointermove", (e) => {
-  if (!camDragging) return;
-  state.camYaw   = Math.max(-0.55, Math.min(0.55, state.camYaw - (e.clientX - dragLX) * 0.0022));
-  state.camPitch = Math.max(-0.35, Math.min(0.35, state.camPitch + (e.clientY - dragLY) * 0.0016));
-  dragLX = e.clientX; dragLY = e.clientY;
-});
-window.addEventListener("pointerup", () => { camDragging = false; });
-
+let lastCheer = 0;   // きらめき演出の連打防止
 window.addEventListener("keydown", (e) => {
   if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(e.key)) e.preventDefault();
   state.keys[e.key.toLowerCase()] = true;
   state.keys[e.key] = true;
+  // ← →: 祝いのきらめきを散らす(運搬中のみ)
+  if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && state.scene === "game" && state.phase === "play") {
+    const now = performance.now();
+    if (now - lastCheer > 200) {
+      lastCheer = now;
+      const ox = e.key === "ArrowLeft" ? -0.6 : 0.6;
+      burstSparkles(state.x + ox, state.y + 0.1, state.dist + GAME.STATUE_AHEAD, 22, 0.35);
+    }
+  }
 });
 window.addEventListener("keyup", (e) => {
   state.keys[e.key.toLowerCase()] = false;
@@ -1157,19 +1179,13 @@ function updateGame(dt) {
   state.x = Math.max(-GAME.X_RANGE, Math.min(GAME.X_RANGE, state.x));
   state.y = Math.max(GAME.Y_MIN, Math.min(GAME.Y_MAX, state.y));
 
-  /* --- カメラの見回し(↑↓キー。離すと正面へ戻る) --- */
-  if (state.keys["ArrowUp"]) state.camPitch = Math.min(0.35, state.camPitch + 0.8 * dt);
-  else if (state.keys["ArrowDown"]) state.camPitch = Math.max(-0.35, state.camPitch - 0.8 * dt);
-  else if (!camDragging) state.camPitch *= Math.exp(-2.5 * dt);
-  if (!camDragging) state.camYaw *= Math.exp(-2.5 * dt);
-
-  /* --- 前進速度(←→キー) --- */
+  /* --- 前進速度(↑で進む・↓で止まる) --- */
   if (state.lost) {
     // ロスト中は安全のため停止方向へ
     state.speed = Math.max(0, state.speed - GAME.BRAKE * dt);
-  } else if (state.keys["ArrowRight"]) {
+  } else if (state.keys["ArrowUp"]) {
     state.speed = Math.min(GAME.MAX_SPEED, state.speed + GAME.ACCEL * dt);
-  } else if (state.keys["ArrowLeft"]) {
+  } else if (state.keys["ArrowDown"]) {
     state.speed = Math.max(0, state.speed - GAME.BRAKE * dt);
   } else {
     state.speed = Math.max(0, state.speed - GAME.FRICTION * dt);
@@ -1184,6 +1200,7 @@ function updateGame(dt) {
     if (d <= GAME.RING_R) {
       state.ringsPassed++;
       state.effects.push({ type: "pass", z: rz, t0: performance.now() });
+      burstSparkles(pathX3(rz), pathY3(rz), rz, 28, GAME.RING_R);   // 輪の縁からきらめきが弾ける
     } else {
       state.damage = Math.min(GAME.DAMAGE_MAX, state.damage + GAME.RING_DMG);
       state.missTimer = 1.4;
@@ -1252,7 +1269,7 @@ function triggerEvent(lines, bg) {
 }
 
 /* ---- 描画(擬似3D: お堂の奥へ進む三人称視点) ---- */
-function renderGame() {
+function renderGame(dt) {
   const ctx = gctx;
   const camZ = state.dist;
   const camX = state.x * 0.55;   // カメラは観音さまを半分だけ追いかける(視差が出る)
@@ -1287,6 +1304,34 @@ function renderGame() {
     const a = proj(-3.6, 0, z, camX, camZ);
     const b = proj(3.6, 0, z, camX, camZ);
     ctx.strokeStyle = `rgba(217,180,91,${0.06 * f})`;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+
+  /* 壁沿いの長押(なげし)・天井の桁: 消失点へ収束する水平材 */
+  for (const side of [-1, 1]) {
+    for (const [yy, col] of [[2.3, "rgba(122,82,46,0.4)"], [2.95, "rgba(100,66,36,0.35)"]]) {
+      const a = proj(side * VIEW.HALL_HALF, yy, camZ + 1.0, camX, camZ);
+      const b = proj(side * VIEW.HALL_HALF, yy, camZ + VIEW.VIEW_DIST, camX, camZ);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+  }
+  /* 天井の垂木(縦方向)と小梁(2mごと) */
+  for (const xi of [-2.4, -1.2, 0, 1.2, 2.4]) {
+    const a = proj(xi, VIEW.CEIL_H, camZ + 1.0, camX, camZ);
+    const b = proj(xi, VIEW.CEIL_H, camZ + VIEW.VIEW_DIST, camX, camZ);
+    ctx.strokeStyle = "rgba(96,64,36,0.3)";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  for (let z = Math.ceil((camZ + 1) / 2) * 2; z < camZ + VIEW.VIEW_DIST; z += 2) {
+    const f = 1 - fogAt(z - camZ);
+    if (f <= 0) continue;
+    const a = proj(-3.2, VIEW.CEIL_H, z, camX, camZ);
+    const b = proj(3.2, VIEW.CEIL_H, z, camX, camZ);
+    ctx.strokeStyle = `rgba(110,74,42,${0.22 * f})`;
+    ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
   }
 
@@ -1376,10 +1421,15 @@ function renderGame() {
         grad.addColorStop(1, `rgba(24,15,8,${f})`);
         ctx.fillStyle = grad;
         ctx.fillRect(base.x - w / 2, top.y, w, base.y - top.y);
-        /* 柱元の灯籠の灯り(近すぎる灯りは半径を抑えて輪状のムラを防ぐ) */
+        /* 柱の上部に朱塗りの帯 */
+        const colH = base.y - top.y;
+        ctx.fillStyle = `rgba(122,31,31,${0.8 * f})`;
+        ctx.fillRect(base.x - w / 2, top.y + colH * 0.06, w, colH * 0.05);
+        /* 柱元の灯籠の灯り(炎のゆらぎ付き。近すぎる灯りは半径を抑える) */
+        const flick = 0.82 + 0.18 * Math.sin(nowT * 6.3 + it.z * 1.7);
         const lr = Math.min(120, 0.9 * base.s);
         const lg = ctx.createRadialGradient(base.x, base.y, 1, base.x, base.y, lr);
-        lg.addColorStop(0, `rgba(255,200,110,${0.28 * f})`);
+        lg.addColorStop(0, `rgba(255,200,110,${0.28 * f * flick})`);
         lg.addColorStop(1, "rgba(255,200,110,0)");
         ctx.fillStyle = lg;
         ctx.beginPath(); ctx.arc(base.x, base.y, lr, 0, Math.PI * 2); ctx.fill();
@@ -1430,7 +1480,54 @@ function renderGame() {
     ctx.lineWidth = Math.max(2, r * 0.08);
     ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.stroke();
   }
+
+  /* 空中を漂う金の塵 */
+  for (const m of motes) {
+    if (m.z < camZ + 0.4) {
+      // カメラの後ろに流れたら奥へ再配置
+      m.z += VIEW.VIEW_DIST;
+      m.x = (Math.random() - 0.5) * 6.6;
+      m.y = 0.2 + Math.random() * 3.2;
+    }
+    const mx = m.x + Math.sin(nowT * m.sp + m.ph) * 0.25;
+    const my = m.y + Math.cos(nowT * m.sp * 0.7 + m.ph) * 0.15;
+    const p = proj(mx, my, m.z, camX, camZ);
+    const f = 1 - fogAt(p.dz);
+    if (f <= 0.03) continue;
+    const tw = 0.5 + 0.5 * Math.sin(nowT * 2.3 + m.ph * 3);
+    ctx.fillStyle = `rgba(255,226,150,${0.20 * f * tw})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0.7, 0.012 * p.s), 0, Math.PI * 2); ctx.fill();
+  }
+
+  /* きらめきパーティクル(十字の光) */
+  for (let i = sparkles.length - 1; i >= 0; i--) {
+    const s = sparkles[i];
+    s.life += dt;
+    if (s.life >= s.ttl) { sparkles.splice(i, 1); continue; }
+    s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
+    s.vy -= 0.35 * dt;   // ふわりと減速して落ちる
+    const p = proj(s.x, s.y, s.z, camX, camZ);
+    if (p.dz < 0.15) continue;
+    const k = 1 - s.life / s.ttl;
+    const a = Math.min(1, k * 1.3) * (0.6 + 0.4 * Math.sin(s.tw + nowT * 10));
+    const r = Math.max(2, Math.min(12, 0.065 * p.s * (0.4 + 0.6 * k)));
+    ctx.strokeStyle = `rgba(255,240,190,${a})`;
+    ctx.lineWidth = Math.max(1, r * 0.28);
+    ctx.beginPath();
+    ctx.moveTo(p.x - r, p.y); ctx.lineTo(p.x + r, p.y);
+    ctx.moveTo(p.x, p.y - r); ctx.lineTo(p.x, p.y + r);
+    ctx.stroke();
+    ctx.fillStyle = `rgba(255,246,210,${a})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.3, 0, Math.PI * 2); ctx.fill();
+  }
   ctx.restore();
+
+  /* ビネット(四隅を落として灯りに視線を集める) */
+  const vg = ctx.createRadialGradient(VIEW.CX, VIEW.CY, 250, VIEW.CX, VIEW.CY, 640);
+  vg.addColorStop(0, "rgba(0,0,0,0)");
+  vg.addColorStop(1, "rgba(0,0,0,0.5)");
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
 
   /* HUD */
   drawHud(ctx);
@@ -1610,10 +1707,24 @@ function loop(ts) {
     renderCalib();
   } else if (state.scene === "game") {
     updateGame(dt);
-    renderGame();
+    renderGame(dt);
   }
   requestAnimationFrame(loop);
 }
+
+/* ---- 表示品質: 高DPIレンダリング & 画面サイズへのフィット ---- */
+// 運搬パートのキャンバスをデバイス解像度で描画してくっきりさせる
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+gameCanvas.width = W * DPR;
+gameCanvas.height = H * DPR;
+gctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+// ゲーム全体(960x600)を画面いっぱいに拡大縮小する
+function fitApp() {
+  const k = Math.min(2, window.innerWidth / 960, window.innerHeight / 600);
+  document.getElementById("app").style.transform = `scale(${k})`;
+}
+window.addEventListener("resize", fitApp);
+fitApp();
 
 applyImages();
 setBgm("title");
