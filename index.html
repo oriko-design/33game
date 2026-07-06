@@ -162,6 +162,16 @@
     border: 1px solid var(--gold-dim); border-radius: 6px;
     padding: 22px 34px 30px; font-size: 17px; line-height: 2.1;
   }
+  /* 話者の名前プレート(セリフ行のみ表示) */
+  #novel .textbox .name {
+    display: none; position: absolute; top: -17px; left: 26px;
+    background: linear-gradient(180deg, var(--crimson), #571414);
+    border: 1px solid var(--gold-dim); border-radius: 4px;
+    padding: 3px 20px; font-size: 14px; letter-spacing: .25em; color: var(--gold);
+  }
+  /* セリフ中は立ち絵を明るく、地の文では少し落とす */
+  #novel .portrait img { filter: brightness(.8); transition: filter .25s; }
+  #novel .portrait.speaking img { filter: brightness(1.05); }
   #novel .textbox .cursor {
     position: absolute; right: 20px; bottom: 10px; color: var(--gold);
     animation: blink 1.1s infinite; font-size: 14px;
@@ -384,6 +394,7 @@
       <p class="caption">後白河上皇</p>
     </div>
     <div class="textbox">
+      <span class="name" id="novel-name"></span>
       <span id="novel-text"></span>
       <span class="cursor">▼</span>
     </div>
@@ -480,13 +491,17 @@ const PREP_NOTICE = {
   trivia: "粘土が白っぽいときは、カメラに映る背景を濃い色にしておくと見つけやすくなりますよ。次の画面で、観音さまの色をカメラに教えてあげてくださいね。",
 };
 
+// 行は文字列(地の文)または {name, text}(セリフ。名前プレートを表示)
 const NOVEL_INTRO = [
-  "平安の世の終わり。都で最も力を持つ人物、後白河上皇(ごしらかわじょうこう)は、長年ひどい頭痛に悩まされていた。",
-  "ある夜、夢枕にお告げが下りる。——「上皇の前世は、熊野の僧・蓮華坊(れんげぼう)。その髑髏(されこうべ)が今も川の底に沈み、そこから柳の木が生えている。風が吹くたび柳が揺れ、髑髏に触れる。それがあなたの頭痛の正体である」",
-  "上皇は平清盛に命じ、髑髏を観音像の中へ納め、柳の木を棟木(むなぎ)に使って、一つのお堂を建てさせた。——千体の観音が立ち並ぶ、南北120メートルの長いお堂。のちに「三十三間堂」と呼ばれる。",
-  "「三十三」は、観音さまが33の姿に変化して人々を救うという教えから。千体の観音は、「一人でも多く、一つでも多くの方法で救いたい」という祈りのかたち。",
-  "……そして今、あなたたちの手で千一体目の観音さまが生まれた。",
-  "上皇の頭痛を癒すため、この観音さまをお堂の最も奥までお運びし、奉納してほしい。長い長い、120メートルの道のり。どうか、落とさぬよう。傾けぬよう。",
+  "時は平安の終わりごろ。都でいちばんの力を持っていたのが、後白河上皇(ごしらかわじょうこう)というお方です。……ところがこの上皇さま、長いあいだ、それはひどい頭痛に悩まされていました。",
+  { name: "後白河上皇", text: "ううむ……今日も頭が割れるように痛い……。薬も、祈祷も、なにも効かぬ……" },
+  "そんなある夜のこと。上皇さまの夢枕に、お告げが下ります。",
+  "——『そなたの前世は、熊野の僧・蓮華坊(れんげぼう)。その髑髏(されこうべ)が今も川の底に沈み、そこから柳の木が生えておる。風が吹くたび柳が揺れて、髑髏に触れる。……それが、その頭痛の正体じゃ』",
+  { name: "後白河上皇", text: "なんと……! では、その髑髏を引き上げて、ねんごろに供養せねば……!" },
+  "上皇さまは平清盛に命じて、髑髏を観音像の中へ納め、柳の木を棟木(むなぎ)に使って、一つのお堂を建てさせました。——千体の観音が立ち並ぶ、南北120メートルの長いお堂。のちの「三十三間堂」です。",
+  "「三十三」というのは、観音さまが33の姿に変化して人々を救う、という教えから。千体の観音は、「一人でも多く、一つでも多くの方法で救いたい」——そんな祈りのかたちなんですね。",
+  "……そして今。あなたたちの手で、千一体目の観音さまが生まれました。",
+  { name: "後白河上皇", text: "頼む。その観音さまを、お堂のいちばん奥へ運び、奉納してほしい。長い長い、120メートルの道のりじゃ。……どうか、落とさぬようにな。" },
 ];
 
 const NOVEL_EVENT1 = [
@@ -500,9 +515,9 @@ const NOVEL_EVENT2 = [
   "千年間、この場所で。……あなたたちの観音さまも、今日からその仲間になる。",
 ];
 const NOVEL_ENDING = [
-  "千一体目の観音さまが、静かに列に加わった。",
-  "柳は棟木となり、髑髏は観音さまの胎内へ。——その日から、上皇の頭痛はぴたりと止んだという。",
-  "三十三間堂が「頭痛山平癒寺(ずつうさんへいゆじ)」とも呼ばれるのは、この伝説から。今も毎年お正月には、柳の枝で清めた水を頭に注ぐ「楊枝(やなぎ)のお加持」が行われている。",
+  "千一体目の観音さまが、静かに列に加わりました。",
+  "柳は棟木に、髑髏は観音さまの胎内へ。——その日から、上皇さまの頭痛はぴたりと止んだと伝えられています。",
+  "三十三間堂が「頭痛山平癒寺(ずつうさんへいゆじ)」とも呼ばれるのは、この伝説から。今でも毎年お正月には、柳の枝で清めた水を頭に注ぐ「楊枝(やなぎ)のお加持」が行われているんですよ。",
 ];
 
 /* ================================================================
@@ -597,7 +612,15 @@ const novel = {
     $("novel").classList.add("active");
     this.render();
   },
-  render() { $("novel-text").textContent = this.lines[this.index]; },
+  render() {
+    // 行は文字列(地の文)または {name, text}(セリフ)
+    const line = this.lines[this.index];
+    const name = typeof line === "object" ? line.name : "";
+    $("novel-name").textContent = name;
+    $("novel-name").style.display = name ? "inline-block" : "none";
+    $("novel-text").textContent = typeof line === "object" ? line.text : line;
+    $("novel-portrait").classList.toggle("speaking", name === "後白河上皇");
+  },
   advance() {
     if (!this.active) return;
     this.index++;
