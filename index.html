@@ -17,8 +17,8 @@
      (キーボードモードのみ確認する場合は file:// でも動作します)
 
 ■ カメラ検出の精度に影響する環境要因(展示前に必ず確認)
-  - 検出方式: 粘土(観音さま)そのものの色を1点追跡し、上下位置のみを読み取ります。
-    傾きの検出はありません。
+  - 検出方式: 粘土(観音さま)そのものの色を1点追跡し、上下・左右の位置を読み取ります。
+    傾きの検出はありません。運搬パートは擬似3D表示で、お堂の奥へ進んでいきます。
   - 粘土の色: 白い紙粘土のままでも動作します(白っぽい色は明るさベースで判定)が、
     白い壁・白い服の前では誤検出しやすくなります。背景に濃い色の布を垂らすか、
     粘土に色を付けると安定します。
@@ -485,19 +485,36 @@ const DETECT = {
    ゲームバランス定数
    ================================================================ */
 const GAME = {
-  GOAL_DIST: 6200,        // ゴールまでの距離(ワールドpx)。全長=120mに見立てる
-  MAX_SPEED: 240,         // 最高速度(px/s)
-  ACCEL: 260,             // →キーの加速(px/s^2)
-  BRAKE: 520,             // ←キーの減速(px/s^2)
-  FRICTION: 150,          // キーを離した時の自然減速(px/s^2)
-  PATH_HALF: 58,          // 光の道の半幅(px)
+  GOAL_DIST: 120,         // ゴールまでの距離(m)。三十三間堂の全長そのまま
+  MAX_SPEED: 2.6,         // 最高速度(m/s)
+  ACCEL: 3.0,             // →キーの加速(m/s^2)
+  BRAKE: 6.0,             // ←キーの減速(m/s^2)
+  FRICTION: 1.8,          // キーを離した時の自然減速(m/s^2)
+  PATH_R: 0.85,           // 光の道の安全半径(m)
   DAMAGE_PATH: 20,        // 道から外れている間のダメージ(%/s)
   DAMAGE_MAX: 100,        // ゲージ最大
   CRACK_STEP: 20,         // ヒビが1本増えるダメージ間隔(%)
   EVENT1_AT: 0.5,         // イベント1の発動位置(進行率)
   EVENT2_AT: 0.85,        // イベント2の発動位置(進行率)
-  KB_Y_SPEED: 230,        // キーボードモード: 上下速度(px/s)
-  Y_MIN: 130, Y_MAX: 470, // 観音さまの可動範囲(画面px)
+  KB_MOVE: 1.9,           // キーボードモード: 上下左右の移動速度(m/s)
+  X_RANGE: 2.2,           // 観音さまの左右可動域(±m)
+  Y_MIN: 0.3, Y_MAX: 2.3, // 観音さまの上下可動域(m)
+  STATUE_AHEAD: 2.1,      // 観音さまはカメラの何m先を進むか
+};
+
+/* 擬似3D描画のパラメータ(お堂の寸法・見え方) */
+const VIEW = {
+  F: 560,            // 焦点距離(px)。大きいほど望遠
+  CX: 480, CY: 292,  // 消失点(画面中心よりやや上)
+  CAM_H: 1.35,       // カメラの高さ(m)
+  CEIL_H: 3.6,       // 天井の高さ(m)
+  HALL_HALF: 3.1,    // 柱列の左右位置(±m)
+  KANNON_X: 4.0,     // 千体観音の列の左右位置(±m)
+  PILLAR_GAP: 6,     // 柱の間隔(m)
+  KANNON_GAP: 1.4,   // 千体観音の間隔(m)
+  VIEW_DIST: 45,     // 描画距離(m)
+  FOG_NEAR: 6,       // フォグ開始距離(m)
+  FOG_FAR: 40,       // フォグ終了距離(m)=完全に闇
 };
 
 /* ================================================================
@@ -522,7 +539,7 @@ const CRAFT_STEPS = [
 ];
 const PREP_NOTICE = {
   title: "運搬のごあんない", icon: "🤲",
-  inst: "できあがった観音さまを、そっと手に取ってください。カメラの前で上下に動かすと、画面の中の観音さまも、いっしょに動きます。",
+  inst: "できあがった観音さまを、そっと手に取ってください。カメラの前で上下・左右に動かすと、画面の中の観音さまも、いっしょに動きます。",
   trivia: "粘土が白っぽいときは、カメラに映る背景を濃い色にしておくと見つけやすくなりますよ。次の画面で、観音さまの色をカメラに教えてあげてくださいね。",
 };
 
@@ -576,9 +593,10 @@ const state = {
   wish: "",               // 入力された願い事
   // --- 運搬パート ---
   phase: "intro",         // intro / play / event / rest / goal
-  dist: 0,                // 進行距離(ワールドpx)
-  speed: 0,               // 現在速度
-  y: 300,                 // 観音さまの画面Y
+  dist: 0,                // 進行距離(m)=カメラのZ位置
+  speed: 0,               // 現在速度(m/s)
+  x: 0,                   // 観音さまの左右位置(m)
+  y: 1.2,                 // 観音さまの高さ(m)
   damage: 0,              // ダメージゲージ(0-100)
   crackCount: 0,          // 累計ヒビ数(リザルト用)
   crackStageMax: 0,       // 現ゲージ内で到達したヒビ段階
@@ -1000,20 +1018,37 @@ const gctx = gameCanvas.getContext("2d");
 const camOverlay = $("cam-overlay");
 const octx = camOverlay.getContext("2d");
 const W = gameCanvas.width, H = gameCanvas.height;
-const STATUE_X = 250;   // 観音さまの画面上の固定X
 
-// 光の道: ワールドXに対する中心Y(ゆるやかにうねる)
-function pathY(worldX) {
-  return 300
-    + 85 * Math.sin(worldX * 0.0042)
-    + 42 * Math.sin(worldX * 0.0117 + 2.1);
+/* ---- 光の道(3D曲線): 奥行きzに対する左右x・高さy ---- */
+// 終盤は振れ幅を絞り、中央の中尊へまっすぐ導く
+function pathTaper(z) {
+  return Math.max(0, Math.min(1, (GAME.GOAL_DIST - 4 - z) / 12));
+}
+function pathX3(z) {
+  return (1.15 * Math.sin(z * 0.10) + 0.65 * Math.sin(z * 0.043 + 2.0)) * pathTaper(z);
+}
+function pathY3(z) {
+  return 1.3 + (0.5 * Math.sin(z * 0.13 + 1.0) + 0.25 * Math.sin(z * 0.057)) * pathTaper(z);
+}
+
+/* ---- 透視投影 ---- */
+// ワールド座標(x=右+, y=上+, z=奥+) → 画面座標。s は「1mが何pxか」
+function proj(x, y, z, camX, camZ) {
+  const dz = Math.max(0.12, z - camZ);
+  const s = VIEW.F / dz;
+  return { x: VIEW.CX + (x - camX) * s, y: VIEW.CY - (y - VIEW.CAM_H) * s, s, dz };
+}
+// フォグ量(0=手前くっきり → 1=奥は闇)
+function fogAt(dz) {
+  return Math.min(1, Math.max(0, (dz - VIEW.FOG_NEAR) / (VIEW.FOG_FAR - VIEW.FOG_NEAR)));
 }
 
 function startGame() {
   state.scene = "game";
   state.phase = "intro";
   state.dist = 0; state.speed = 0;
-  state.y = pathY(STATUE_X);
+  state.x = pathX3(GAME.STATUE_AHEAD);
+  state.y = pathY3(GAME.STATUE_AHEAD);
   state.damage = 0; state.crackCount = 0; state.crackStageMax = 0;
   state.playTime = 0;
   state.event1Done = false; state.event2Done = false;
@@ -1022,8 +1057,8 @@ function startGame() {
   setBgm("transport");
   camOverlay.style.display = state.kbMode ? "none" : "block";
   $("intro-controls").innerHTML = state.kbMode
-    ? "W / S:上下 ← / →:進む・止まる"
-    : "粘土係:観音さまを手に持って、カメラの前で上下にそっと動かす<br>キーボード係:← / →キーで進む速さを決める(1人のときは左手に観音さま・右手にキーボード)";
+    ? "W / S:上下 A / D:左右 ← / →:奥へ進む・止まる"
+    : "粘土係:観音さまを手に持って、カメラの前で上下・左右にそっと動かす<br>キーボード係:← / →キーで奥へ進む速さを決める(1人のときは左手に観音さま・右手にキーボード)";
   $("overlay-intro").classList.add("active");
   $("overlay-rest").classList.remove("active");
 }
@@ -1054,22 +1089,27 @@ function updateGame(dt) {
   if (state.phase !== "play") return;
   state.playTime += dt;
 
-  /* --- 上下の入力 --- */
+  /* --- 上下・左右の入力 --- */
   if (state.kbMode) {
-    // キーボードモード: W/S で上下のみ
-    if (state.keys["w"]) state.y -= GAME.KB_Y_SPEED * dt;
-    if (state.keys["s"]) state.y += GAME.KB_Y_SPEED * dt;
+    // キーボードモード: W/S 上下、A/D 左右
+    if (state.keys["w"]) state.y += GAME.KB_MOVE * dt;
+    if (state.keys["s"]) state.y -= GAME.KB_MOVE * dt;
+    if (state.keys["a"]) state.x -= GAME.KB_MOVE * dt;
+    if (state.keys["d"]) state.x += GAME.KB_MOVE * dt;
     state.lost = false;
   } else {
     detectMarkers();
     state.lost = !cam.clay.found;
     if (!state.lost) {
-      // 粘土の重心Y → 観音さまの上下位置
-      const clayY = cam.clay.y / DETECT.PROC_H;                  // 0..1
-      state.y = GAME.Y_MIN + clayY * (GAME.Y_MAX - GAME.Y_MIN);
+      // 粘土の重心 → 観音さまの位置(鏡像座標系なので左右は見た目と一致)
+      const nx = cam.clay.x / DETECT.PROC_W;                    // 0..1
+      const ny = cam.clay.y / DETECT.PROC_H;                    // 0..1(下が1)
+      state.x = (nx - 0.5) * 2 * GAME.X_RANGE;
+      state.y = GAME.Y_MAX - ny * (GAME.Y_MAX - GAME.Y_MIN);    // 画面の上=高い位置
     }
-    // ロスト時は y を凍結(誤動作で落とさない)
+    // ロスト時は位置を凍結(誤動作で落とさない)
   }
+  state.x = Math.max(-GAME.X_RANGE, Math.min(GAME.X_RANGE, state.x));
   state.y = Math.max(GAME.Y_MIN, Math.min(GAME.Y_MAX, state.y));
 
   /* --- 前進速度(←→キー) --- */
@@ -1086,8 +1126,10 @@ function updateGame(dt) {
   state.dist += state.speed * dt;
 
   /* --- ダメージ判定(光の道から外れている間だけ) --- */
-  const safeY = pathY(state.dist + STATUE_X);
-  const offPath = Math.abs(state.y - safeY) > GAME.PATH_HALF;
+  const sz = state.dist + GAME.STATUE_AHEAD;   // 観音さまの現在の奥行き
+  const dx = state.x - pathX3(sz);
+  const dy = state.y - pathY3(sz);
+  const offPath = Math.hypot(dx, dy) > GAME.PATH_R;
   if (!state.lost && offPath) {
     state.damage += GAME.DAMAGE_PATH * dt;
     state.damage = Math.min(GAME.DAMAGE_MAX, state.damage);
@@ -1152,108 +1194,151 @@ function triggerEvent(lines, bg) {
   novel.show(lines, { bg: bg || "" }, () => { state.phase = "play"; });
 }
 
-/* ---- 描画 ---- */
+/* ---- 描画(擬似3D: お堂の奥へ進む三人称視点) ---- */
 function renderGame() {
   const ctx = gctx;
+  const camZ = state.dist;
+  const camX = state.x * 0.55;   // カメラは観音さまを半分だけ追いかける(視差が出る)
+  const nowT = performance.now() / 1000;
   ctx.clearRect(0, 0, W, H);
 
-  /* 背景: 薄暗いお堂(奥行きのグラデーション) */
-  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
-  bgGrad.addColorStop(0, "#1d150c");
-  bgGrad.addColorStop(0.62, "#2b1f12");
-  bgGrad.addColorStop(0.72, "#3a2a18");
-  bgGrad.addColorStop(1, "#241a0e");
-  ctx.fillStyle = bgGrad;
-  ctx.fillRect(0, 0, W, H);
+  /* 天井と床(奥は闇に沈む) */
+  const ceil = ctx.createLinearGradient(0, 0, 0, VIEW.CY);
+  ceil.addColorStop(0, "#0d0805");
+  ceil.addColorStop(1, "#1a120a");
+  ctx.fillStyle = ceil;
+  ctx.fillRect(0, 0, W, VIEW.CY);
+  const floor = ctx.createLinearGradient(0, VIEW.CY, 0, H);
+  floor.addColorStop(0, "#1a120a");
+  floor.addColorStop(0.25, "#241708");
+  floor.addColorStop(1, "#3d2b16");
+  ctx.fillStyle = floor;
+  ctx.fillRect(0, VIEW.CY, W, H - VIEW.CY);
 
-  /* 奥の千体観音(パララックス0.3で流れる金色の列) */
-  const far = state.dist * 0.3;
-  ctx.save();
-  const bgSp = sprites.kannonBg;
-  if (bgSp) {
-    // スプライト版: 立ち姿を等間隔に並べる
-    const bh = 104, bw = bh * bgSp.width / bgSp.height;
-    const gap = 84;
-    ctx.globalAlpha = 0.5;
-    for (let i = -1; i < Math.ceil(W / gap) + 1; i++) {
-      const x = ((i * gap - far % gap) + gap) % (W + gap) - gap / 2;
-      ctx.drawImage(bgSp, x - bw / 2, 372 - bh, bw, bh);
-    }
-  } else {
-    // フォールバック: 図形で簡易表現
-    for (let i = -1; i < 16; i++) {
-      const x = ((i * 68 - far % 68) + 68) % (W + 68) - 34;
-      const gy = 335;
-      ctx.fillStyle = "rgba(217,180,91,0.16)";
-      ctx.beginPath(); ctx.arc(x, gy - 26, 13, 0, Math.PI * 2); ctx.fill(); // 光背
-      ctx.fillStyle = "rgba(160,128,60,0.30)";
-      ctx.beginPath(); ctx.arc(x, gy - 26, 5, 0, Math.PI * 2); ctx.fill();  // 頭
-      ctx.fillRect(x - 7, gy - 22, 14, 34);                                  // 体
-    }
-  }
-  ctx.restore();
-
-  /* 床 */
-  ctx.fillStyle = "#171006";
-  ctx.fillRect(0, 372, W, H - 372);
-  ctx.strokeStyle = "rgba(217,180,91,0.10)";
+  /* 床板の目地(奥行き方向の線は消失点へ収束) */
   ctx.lineWidth = 1;
-  const floorScroll = state.dist % 120;
-  for (let i = 0; i < 12; i++) {
-    const x = i * 120 - floorScroll;
-    ctx.beginPath(); ctx.moveTo(x, 372); ctx.lineTo(x - 80, H); ctx.stroke(); // 床板の目地
+  for (let xi = -3.5; xi <= 3.5; xi += 1) {
+    const a = proj(xi, 0, camZ + 1.0, camX, camZ);
+    const b = proj(xi, 0, camZ + VIEW.VIEW_DIST, camX, camZ);
+    ctx.strokeStyle = "rgba(217,180,91,0.07)";
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  /* 床板の横目地(2mごと) */
+  for (let z = Math.ceil((camZ + 1) / 2) * 2; z < camZ + VIEW.VIEW_DIST; z += 2) {
+    const f = 1 - fogAt(z - camZ);
+    if (f <= 0) continue;
+    const a = proj(-3.6, 0, z, camX, camZ);
+    const b = proj(3.6, 0, z, camX, camZ);
+    ctx.strokeStyle = `rgba(217,180,91,${0.06 * f})`;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
   }
 
-  /* 柱(パララックス1.0、等間隔) */
-  const pillarGap = 420;
-  const scroll = state.dist % pillarGap;
-  for (let i = -1; i < 4; i++) {
-    const x = i * pillarGap - scroll + 120;
-    const grad = ctx.createLinearGradient(x - 22, 0, x + 22, 0);
-    grad.addColorStop(0, "#2a1c0f");
-    grad.addColorStop(0.5, "#59402a");
-    grad.addColorStop(1, "#20140a");
-    ctx.fillStyle = grad;
-    ctx.fillRect(x - 22, 0, 44, 400);
-    ctx.fillStyle = "#4a3016";
-    ctx.fillRect(x - 30, 0, 60, 26);   // 梁
-    // 柱元の灯り
-    const lg = ctx.createRadialGradient(x, 392, 4, x, 392, 60);
-    lg.addColorStop(0, "rgba(255,200,110,0.35)");
-    lg.addColorStop(1, "rgba(255,200,110,0)");
-    ctx.fillStyle = lg;
-    ctx.beginPath(); ctx.arc(x, 392, 60, 0, Math.PI * 2); ctx.fill();
+  /* 奥から手前へ描く要素(柱・梁・灯り・千体観音)を集めて深度順に描画 */
+  const items = [];
+  for (let z = Math.ceil((camZ + 1.5) / VIEW.PILLAR_GAP) * VIEW.PILLAR_GAP;
+       z < camZ + VIEW.VIEW_DIST; z += VIEW.PILLAR_GAP) {
+    items.push({ z, kind: "pillar" });
+  }
+  if (sprites.kannonBg) {
+    for (let z = Math.ceil((camZ + 1.2) / VIEW.KANNON_GAP) * VIEW.KANNON_GAP;
+         z < camZ + VIEW.VIEW_DIST; z += VIEW.KANNON_GAP) {
+      items.push({ z, kind: "kannon" });
+    }
+  }
+  items.sort((p, q) => q.z - p.z);   // 遠い順
+
+  for (const it of items) {
+    const f = 1 - fogAt(it.z - camZ);
+    if (f <= 0.02) continue;
+    if (it.kind === "kannon") {
+      /* 千体観音の列(左右) */
+      const sp = sprites.kannonBg;
+      const h = 1.7;   // 像の高さ(m)
+      for (const side of [-1, 1]) {
+        const base = proj(side * VIEW.KANNON_X, 0, it.z, camX, camZ);
+        const ph = h * base.s;
+        const pw = ph * sp.width / sp.height;
+        ctx.globalAlpha = 0.62 * f;
+        ctx.drawImage(sp, base.x - pw / 2, base.y - ph, pw, ph);
+      }
+      ctx.globalAlpha = 1;
+    } else {
+      /* 柱と梁 */
+      for (const side of [-1, 1]) {
+        const base = proj(side * VIEW.HALL_HALF, 0, it.z, camX, camZ);
+        const top = proj(side * VIEW.HALL_HALF, VIEW.CEIL_H, it.z, camX, camZ);
+        const w = 0.42 * base.s;
+        const grad = ctx.createLinearGradient(base.x - w / 2, 0, base.x + w / 2, 0);
+        grad.addColorStop(0, `rgba(32,20,10,${f})`);
+        grad.addColorStop(0.5, `rgba(90,64,40,${f})`);
+        grad.addColorStop(1, `rgba(24,15,8,${f})`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(base.x - w / 2, top.y, w, base.y - top.y);
+        /* 柱元の灯籠の灯り(近すぎる灯りは半径を抑えて輪状のムラを防ぐ) */
+        const lr = Math.min(120, 0.9 * base.s);
+        const lg = ctx.createRadialGradient(base.x, base.y, 1, base.x, base.y, lr);
+        lg.addColorStop(0, `rgba(255,200,110,${0.28 * f})`);
+        lg.addColorStop(1, "rgba(255,200,110,0)");
+        ctx.fillStyle = lg;
+        ctx.beginPath(); ctx.arc(base.x, base.y, lr, 0, Math.PI * 2); ctx.fill();
+      }
+      /* 梁(左右の柱をつなぐ) */
+      const lt = proj(-VIEW.HALL_HALF, VIEW.CEIL_H, it.z, camX, camZ);
+      const rt = proj(VIEW.HALL_HALF, VIEW.CEIL_H, it.z, camX, camZ);
+      ctx.fillStyle = `rgba(58,40,22,${f})`;
+      ctx.fillRect(lt.x, lt.y - 0.28 * lt.s, rt.x - lt.x, 0.28 * lt.s);
+    }
   }
 
-  /* 光の道(安全ルート) */
+  /* ゴールの気配: 最奥に金色の光と中尊のシルエット */
+  const dzGoal = GAME.GOAL_DIST + 4 - camZ;
+  if (dzGoal < VIEW.VIEW_DIST + 20 && dzGoal > 0.5) {
+    const g = proj(0, 1.5, GAME.GOAL_DIST + 4, camX, camZ);
+    const glowR = Math.min(900, 3.2 * g.s);
+    const gl = ctx.createRadialGradient(g.x, g.y, 2, g.x, g.y, glowR);
+    const ga = Math.min(0.75, 26 / dzGoal * 0.12);
+    gl.addColorStop(0, `rgba(255,226,150,${ga})`);
+    gl.addColorStop(1, "rgba(255,226,150,0)");
+    ctx.fillStyle = gl;
+    ctx.fillRect(0, 0, W, H);
+    if (sprites.kannonBg) {
+      const ph = 3.4 * g.s, sp = sprites.kannonBg;
+      const pw = ph * sp.width / sp.height;
+      const base = proj(0, 0, GAME.GOAL_DIST + 4, camX, camZ);
+      ctx.globalAlpha = Math.min(0.9, 20 / dzGoal * 0.25);
+      ctx.drawImage(sp, base.x - pw / 2, base.y - ph, pw, ph);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /* 光の道(3Dリボン。奥から手前へ、加算合成で光らせる) */
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  for (const [half, alpha] of [[GAME.PATH_HALF, 0.10], [GAME.PATH_HALF * 0.55, 0.10], [4, 0.5]]) {
-    ctx.beginPath();
-    for (let sx = 0; sx <= W; sx += 16) {
-      const y = pathY(state.dist + sx);
-      if (sx === 0) ctx.moveTo(sx, y); else ctx.lineTo(sx, y);
+  let prev = null;
+  for (let z = camZ + VIEW.VIEW_DIST; z >= camZ + 1.4; z -= 0.7) {
+    const p = proj(pathX3(z), pathY3(z), z, camX, camZ);
+    if (prev) {
+      const f = 1 - fogAt(z - camZ);
+      if (f > 0.02) {
+        // 手前ほど太くなりすぎないよう幅に上限(巨大な光の輪を防ぐ)
+        const wBand = Math.min(150, GAME.PATH_R * p.s * 2);
+        /* 淡い帯 */
+        ctx.strokeStyle = `rgba(255,214,120,${0.08 * f})`;
+        ctx.lineWidth = wBand;
+        ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+        /* 芯の光 */
+        ctx.strokeStyle = `rgba(255,230,160,${0.45 * f})`;
+        ctx.lineWidth = Math.max(1.5, Math.min(14, wBand * 0.09));
+        ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+      }
     }
-    ctx.strokeStyle = `rgba(255,214,120,${alpha})`;
-    ctx.lineWidth = half * 2;
-    ctx.lineCap = "round";
-    ctx.stroke();
+    prev = p;
   }
   ctx.restore();
 
-  /* ゴールの気配(残り距離が近いと奥から光) */
-  const remain = GAME.GOAL_DIST - state.dist;
-  if (remain < 1400) {
-    const a = Math.min(0.5, (1400 - remain) / 1400 * 0.6);
-    const gg = ctx.createRadialGradient(W - 60, 300, 10, W - 60, 300, 420);
-    gg.addColorStop(0, `rgba(255,225,150,${a})`);
-    gg.addColorStop(1, "rgba(255,225,150,0)");
-    ctx.fillStyle = gg;
-    ctx.fillRect(0, 0, W, H);
-  }
-
-  /* 運搬中の観音さま */
-  drawStatue(ctx, STATUE_X, state.y);
+  /* 運搬中の観音さま(カメラの少し先を浮かんで進む) */
+  drawStatue(ctx, camX, camZ, nowT);
 
   /* HUD */
   drawHud(ctx);
@@ -1273,65 +1358,35 @@ function renderGame() {
   }
 }
 
-// 運搬中の観音さまを描く
-function drawStatue(ctx, x, y) {
-  ctx.save();
-  ctx.translate(x, y);
+// 運搬中の観音さまを描く(擬似3D空間内)
+function drawStatue(ctx, camX, camZ, nowT) {
+  const bob = 0.035 * Math.sin(nowT * 2.1);   // ふわりと浮く上下の揺れ
+  const z = camZ + GAME.STATUE_AHEAD;
+  const p = proj(state.x, state.y + bob, z, camX, camZ);
 
-  // 足元のやわらかな光(浮かんで運ばれているイメージ)
-  const foot = ctx.createRadialGradient(0, 48, 2, 0, 48, 40);
+  /* 足元のやわらかな光 */
+  const glowY = p.y + 0.42 * p.s;
+  const foot = ctx.createRadialGradient(p.x, glowY, 2, p.x, glowY, 0.55 * p.s);
   foot.addColorStop(0, "rgba(255,226,150,0.35)");
   foot.addColorStop(1, "rgba(255,226,150,0)");
   ctx.fillStyle = foot;
-  ctx.beginPath(); ctx.ellipse(0, 48, 40, 12, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(p.x, glowY, 0.55 * p.s, 0.16 * p.s, 0, 0, Math.PI * 2); ctx.fill();
 
   const sp = sprites.kannonPlayer;
+  const h = 0.95 * p.s;   // 観音さまの表示高さ(実寸95cm相当)
   if (sp) {
-    // スプライト版(自前の後光付きなのでそのまま描く)
-    const sh = 112, sw = sh * sp.width / sp.height;
-    ctx.drawImage(sp, -sw / 2, -sh * 0.58, sw, sh);
-    drawCracks(ctx);
-    ctx.restore();
-    return;
+    const w = h * sp.width / sp.height;
+    ctx.drawImage(sp, p.x - w / 2, p.y - h * 0.58, w, h);
+  } else {
+    /* フォールバック: 金色のシルエット */
+    ctx.fillStyle = "#d9b45b";
+    ctx.beginPath(); ctx.arc(p.x, p.y - h * 0.28, h * 0.13, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(p.x - h * 0.14, p.y - h * 0.18, h * 0.28, h * 0.5);
   }
-
-  // ---- フォールバック: 図形で簡易表現 ----
-  // 光背(後光)
-  const halo = ctx.createRadialGradient(0, -26, 4, 0, -26, 44);
-  halo.addColorStop(0, "rgba(255,226,150,0.75)");
-  halo.addColorStop(1, "rgba(255,226,150,0)");
-  ctx.fillStyle = halo;
-  ctx.beginPath(); ctx.arc(0, -26, 44, 0, Math.PI * 2); ctx.fill();
-
-  // 体(金色)
-  const body = ctx.createLinearGradient(0, -20, 0, 26);
-  body.addColorStop(0, "#e8c877");
-  body.addColorStop(1, "#a5813e");
-  ctx.fillStyle = body;
-  ctx.beginPath();
-  ctx.moveTo(-16, 26);
-  ctx.quadraticCurveTo(-14, -8, -6, -16);
-  ctx.lineTo(6, -16);
-  ctx.quadraticCurveTo(14, -8, 16, 26);
-  ctx.closePath();
-  ctx.fill();
-  // 手(左右に添えた腕)
-  ctx.strokeStyle = "#d9b45b";
-  ctx.lineWidth = 4; ctx.lineCap = "round";
-  ctx.beginPath(); ctx.moveTo(-10, -4); ctx.quadraticCurveTo(-24, 2, -20, 14); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(10, -4); ctx.quadraticCurveTo(24, 2, 20, 14); ctx.stroke();
-  // 頭
-  ctx.fillStyle = "#e8c877";
-  ctx.beginPath(); ctx.arc(0, -26, 11, 0, Math.PI * 2); ctx.fill();
-  // 十一面(頭上の小さな面)
-  ctx.fillStyle = "#c8a557";
-  ctx.beginPath(); ctx.arc(0, -38, 4.5, 0, Math.PI * 2); ctx.fill();
-  // 顔(穏やかな目)
-  ctx.strokeStyle = "#5a4020";
-  ctx.lineWidth = 1.4;
-  ctx.beginPath(); ctx.moveTo(-5, -27); ctx.quadraticCurveTo(-3, -25.4, -1.2, -27); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(1.2, -27); ctx.quadraticCurveTo(3, -25.4, 5, -27); ctx.stroke();
-
+  /* ヒビ(像のローカル座標系に合わせて拡縮) */
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.scale(h / 112, h / 112);
   drawCracks(ctx);
   ctx.restore();
 }
@@ -1359,7 +1414,7 @@ function drawCracks(ctx) {
 // HUD(進行度・ダメージゲージ・傾き)
 function drawHud(ctx) {
   /* 進行バー */
-  const meters = Math.min(120, state.dist / GAME.GOAL_DIST * 120);
+  const meters = Math.min(GAME.GOAL_DIST, state.dist);
   ctx.fillStyle = "rgba(0,0,0,0.55)";
   ctx.fillRect(180, 18, 600, 30);
   ctx.strokeStyle = "rgba(217,180,91,0.5)";
