@@ -366,9 +366,9 @@
     <div class="game-overlay" id="overlay-intro">
       <div class="panel">
         <p style="color:var(--gold); letter-spacing:.3em; margin-bottom:14px;">― 奉納の道 ―</p>
-        <p>金色に光る「光の道」に沿って、観音さまをお堂の最奥までお運びください。</p>
+        <p>お堂に浮かぶ金色の輪を、順番にくぐりながら、観音さまを最奥までお運びください。</p>
         <p id="intro-controls" style="font-size:14px; color:#d8c9a8; margin-top:10px;"></p>
-        <p style="font-size:14px; color:#d8c9a8;">光の道から外れると、観音さまにヒビが入ってしまいます。あわてず、ゆっくり。</p>
+        <p style="font-size:14px; color:#d8c9a8;">輪から外れると、観音さまにヒビが入ってしまいます。あわてず、ゆっくり。<br>視点は ↑↓キー や 画面のドラッグ で見回せます。</p>
         <br>
         <button class="btn" id="btn-game-start">お運びを始める</button>
       </div>
@@ -401,6 +401,7 @@
     </div>
     <div id="result-panel">
       <p class="row">運搬タイム:<span id="result-time"></span></p>
+      <p class="row">くぐった輪:<span id="result-rings"></span></p>
       <p class="row">ヒビの数:<span id="result-cracks"></span></p>
       <p class="praise" id="result-praise"></p>
       <p class="closing">いつか本物の三十三間堂で、あなたに似た顔の観音さまを探してみてください。</p>
@@ -439,6 +440,9 @@ const IMAGE_PATHS = {
   busshi:       "img/busshi.png",          // 語り手の仏師の立ち絵(制作パート)
   kannonPlayer: "img/kannon_player.png",   // プレイヤーが動かす観音さま(運搬パート)
   kannonBg:     "img/kannon_bg.png",       // 背景に立ち並ぶ千体観音(運搬パート)
+  spFujin:      "img/sp_fujin.png",        // 道中に立つ風神(透過スプライト)
+  spRaijin:     "img/sp_raijin.png",       // 道中に立つ雷神(透過スプライト)
+  spBushu:      "img/sp_bushu.png",        // 道中に立つ二十八部衆(透過スプライト)
   titleBg:      "img/bg_title.jpg",        // タイトル画面のキービジュアル(タイトル文字入り)
   eventFujin:   "img/bg_fujin_raijin.jpg", // イベント1「風神・雷神」の背景
   event28:      "img/bg_28bushu.jpg",      // イベント2「二十八部衆」の背景
@@ -461,6 +465,7 @@ const SE_PATHS = {
   emperorUmu:    "audio/voice_emperor_umu.mp3",     // 上皇「ううむ……」
   emperorNanto:  "audio/voice_emperor_nanto.mp3",   // 上皇「なんと……!」
   emperorTanomu: "audio/voice_emperor_tanomu.mp3",  // 上皇「頼む。……」
+  oracleZense:   "audio/voice_oracle_zense.mp3",    // お告げ「そなたの前世は……」
   oracleDokuro:  "audio/voice_oracle_dokuro.mp3",   // お告げ「蓮華坊の髑髏は……」
   oracleShotai:  "audio/voice_oracle_shotai.mp3",   // お告げ「それが頭痛の正体じゃ」
 };
@@ -490,12 +495,15 @@ const GAME = {
   ACCEL: 3.0,             // →キーの加速(m/s^2)
   BRAKE: 6.0,             // ←キーの減速(m/s^2)
   FRICTION: 1.8,          // キーを離した時の自然減速(m/s^2)
-  PATH_R: 0.85,           // 光の道の安全半径(m)
-  DAMAGE_PATH: 20,        // 道から外れている間のダメージ(%/s)
+  RING_START: 8,          // 最初の輪の位置(m)
+  RING_GAP: 6,            // 輪の間隔(m)
+  RING_R: 0.9,            // 輪の半径(m)。この中を通れば成功
+  RING_DMG: 20,           // 輪を外したときのダメージ(%)
   DAMAGE_MAX: 100,        // ゲージ最大
   CRACK_STEP: 20,         // ヒビが1本増えるダメージ間隔(%)
-  EVENT1_AT: 0.5,         // イベント1の発動位置(進行率)
-  EVENT2_AT: 0.85,        // イベント2の発動位置(進行率)
+  EVENT1_Z: 60,           // 風神・雷神が立っている位置(m)
+  EVENT2_Z: 102,          // 二十八部衆が立っている位置(m)
+  EVENT_NEAR: 2.5,        // 何m手前まで近づいたらエピソード開始か
   KB_MOVE: 1.9,           // キーボードモード: 上下左右の移動速度(m/s)
   X_RANGE: 2.2,           // 観音さまの左右可動域(±m)
   Y_MIN: 0.3, Y_MAX: 2.3, // 観音さまの上下可動域(m)
@@ -549,7 +557,7 @@ const NOVEL_INTRO = [
   { face: "pain", text: "ところがこの上皇さま、長いあいだ、ひどい頭痛に悩まされていました。" },
   { name: "後白河上皇", face: "pain", se: "emperorUmu", text: "ううむ……今日も頭が割れるように痛い……。薬も、祈祷も、なにも効かぬ……" },
   "そんなある夜のこと。眠っている上皇さまの夢の中に、不思議な声が聞こえてきます。",
-  { name: "夢のお告げ", text: "そなたの前世は、熊野の僧・蓮華坊(れんげぼう)じゃ。" },
+  { name: "夢のお告げ", se: "oracleZense", text: "そなたの前世は、熊野の僧・蓮華坊(れんげぼう)じゃ。" },
   { name: "夢のお告げ", se: "oracleDokuro", text: "蓮華坊の髑髏(されこうべ)は、いまも川の底に沈んでおる。髑髏からは柳の木が生えていてな——風が吹くたび、柳が揺れて、髑髏にこつん、こつんと当たるのじゃ。" },
   { name: "夢のお告げ", se: "oracleShotai", text: "それが、そなたの頭痛の正体じゃ。" },
   { name: "後白河上皇", se: "emperorNanto", text: "なんと……! では、その髑髏を引き上げて、ねんごろに供養せねば……!" },
@@ -597,6 +605,12 @@ const state = {
   speed: 0,               // 現在速度(m/s)
   x: 0,                   // 観音さまの左右位置(m)
   y: 1.2,                 // 観音さまの高さ(m)
+  camYaw: 0,              // カメラの首振り(左右, rad)
+  camPitch: 0,            // カメラの首振り(上下, rad)
+  ringIndex: 0,           // 次にくぐる輪の番号
+  ringsPassed: 0,         // くぐれた輪の数
+  missTimer: 0,           // 輪を外した直後の警告表示タイマー(秒)
+  effects: [],            // 輪くぐり成功などの一時エフェクト
   damage: 0,              // ダメージゲージ(0-100)
   crackCount: 0,          // 累計ヒビ数(リザルト用)
   crackStageMax: 0,       // 現ゲージ内で到達したヒビ段階
@@ -697,6 +711,9 @@ function applyImages() {
   // 運搬パートのキャンバス描画用スプライトを先読み
   loadSprite("kannonPlayer");
   loadSprite("kannonBg");
+  loadSprite("spFujin");
+  loadSprite("spRaijin");
+  loadSprite("spBushu");
 }
 
 // キャンバス描画用スプライト(読み込み完了したものだけ使い、未設定なら図形描画にフォールバック)
@@ -1019,7 +1036,11 @@ const camOverlay = $("cam-overlay");
 const octx = camOverlay.getContext("2d");
 const W = gameCanvas.width, H = gameCanvas.height;
 
-/* ---- 光の道(3D曲線): 奥行きzに対する左右x・高さy ---- */
+/* ---- くぐる輪の位置一覧(等間隔) ---- */
+const RINGS = [];
+for (let rz = GAME.RING_START; rz <= GAME.GOAL_DIST - 4; rz += GAME.RING_GAP) RINGS.push(rz);
+
+/* ---- 導きの道(3D曲線): 輪はこの曲線上に並ぶ ---- */
 // 終盤は振れ幅を絞り、中央の中尊へまっすぐ導く
 function pathTaper(z) {
   return Math.max(0, Math.min(1, (GAME.GOAL_DIST - 4 - z) / 12));
@@ -1034,9 +1055,16 @@ function pathY3(z) {
 /* ---- 透視投影 ---- */
 // ワールド座標(x=右+, y=上+, z=奥+) → 画面座標。s は「1mが何pxか」
 function proj(x, y, z, camX, camZ) {
-  const dz = Math.max(0.12, z - camZ);
-  const s = VIEW.F / dz;
-  return { x: VIEW.CX + (x - camX) * s, y: VIEW.CY - (y - VIEW.CAM_H) * s, s, dz };
+  // カメラの首振り(ヨー→ピッチの順に回転)を反映
+  let dx = x - camX, dy = y - VIEW.CAM_H, dz = z - camZ;
+  const cy = Math.cos(state.camYaw), sy = Math.sin(state.camYaw);
+  const dx2 = dx * cy - dz * sy;
+  const dzY = dx * sy + dz * cy;
+  const cp = Math.cos(state.camPitch), sp = Math.sin(state.camPitch);
+  const dy2 = dy * cp - dzY * sp;
+  const dz2 = Math.max(0.12, dy * sp + dzY * cp);
+  const s = VIEW.F / dz2;
+  return { x: VIEW.CX + dx2 * s, y: VIEW.CY - dy2 * s, s, dz: dz2 };
 }
 // フォグ量(0=手前くっきり → 1=奥は闇)
 function fogAt(dz) {
@@ -1049,6 +1077,9 @@ function startGame() {
   state.dist = 0; state.speed = 0;
   state.x = pathX3(GAME.STATUE_AHEAD);
   state.y = pathY3(GAME.STATUE_AHEAD);
+  state.camYaw = 0; state.camPitch = 0;
+  state.ringIndex = 0; state.ringsPassed = 0;
+  state.missTimer = 0; state.effects = [];
   state.damage = 0; state.crackCount = 0; state.crackStageMax = 0;
   state.playTime = 0;
   state.event1Done = false; state.event2Done = false;
@@ -1057,7 +1088,7 @@ function startGame() {
   setBgm("transport");
   camOverlay.style.display = state.kbMode ? "none" : "block";
   $("intro-controls").innerHTML = state.kbMode
-    ? "W / S:上下 A / D:左右 ← / →:奥へ進む・止まる"
+    ? "W / S:上下 A / D:左右 ← / →:奥へ進む・止まる ↑ / ↓:視点"
     : "粘土係:観音さまを手に持って、カメラの前で上下・左右にそっと動かす<br>キーボード係:← / →キーで奥へ進む速さを決める(1人のときは左手に観音さま・右手にキーボード)";
   $("overlay-intro").classList.add("active");
   $("overlay-rest").classList.remove("active");
@@ -1074,6 +1105,20 @@ $("btn-rest-resume").addEventListener("click", () => {
 });
 
 /* ---- 入力 ---- */
+// マウスドラッグでカメラの見回し(離すとゆっくり正面へ戻る)
+let camDragging = false, dragLX = 0, dragLY = 0;
+gameCanvas.addEventListener("pointerdown", (e) => {
+  if (state.scene !== "game" || state.phase !== "play") return;
+  camDragging = true; dragLX = e.clientX; dragLY = e.clientY;
+});
+window.addEventListener("pointermove", (e) => {
+  if (!camDragging) return;
+  state.camYaw   = Math.max(-0.55, Math.min(0.55, state.camYaw - (e.clientX - dragLX) * 0.0022));
+  state.camPitch = Math.max(-0.35, Math.min(0.35, state.camPitch + (e.clientY - dragLY) * 0.0016));
+  dragLX = e.clientX; dragLY = e.clientY;
+});
+window.addEventListener("pointerup", () => { camDragging = false; });
+
 window.addEventListener("keydown", (e) => {
   if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(e.key)) e.preventDefault();
   state.keys[e.key.toLowerCase()] = true;
@@ -1112,6 +1157,12 @@ function updateGame(dt) {
   state.x = Math.max(-GAME.X_RANGE, Math.min(GAME.X_RANGE, state.x));
   state.y = Math.max(GAME.Y_MIN, Math.min(GAME.Y_MAX, state.y));
 
+  /* --- カメラの見回し(↑↓キー。離すと正面へ戻る) --- */
+  if (state.keys["ArrowUp"]) state.camPitch = Math.min(0.35, state.camPitch + 0.8 * dt);
+  else if (state.keys["ArrowDown"]) state.camPitch = Math.max(-0.35, state.camPitch - 0.8 * dt);
+  else if (!camDragging) state.camPitch *= Math.exp(-2.5 * dt);
+  if (!camDragging) state.camYaw *= Math.exp(-2.5 * dt);
+
   /* --- 前進速度(←→キー) --- */
   if (state.lost) {
     // ロスト中は安全のため停止方向へ
@@ -1125,30 +1176,37 @@ function updateGame(dt) {
   }
   state.dist += state.speed * dt;
 
-  /* --- ダメージ判定(光の道から外れている間だけ) --- */
+  /* --- 輪くぐり判定(輪の位置を通過した瞬間に、輪の中にいたかを判定) --- */
   const sz = state.dist + GAME.STATUE_AHEAD;   // 観音さまの現在の奥行き
-  const dx = state.x - pathX3(sz);
-  const dy = state.y - pathY3(sz);
-  const offPath = Math.hypot(dx, dy) > GAME.PATH_R;
-  if (!state.lost && offPath) {
-    state.damage += GAME.DAMAGE_PATH * dt;
-    state.damage = Math.min(GAME.DAMAGE_MAX, state.damage);
-    // ヒビの段階が進んだらカウント
-    const stage = Math.floor(state.damage / GAME.CRACK_STEP);
-    if (stage > state.crackStageMax) {
-      state.crackCount += stage - state.crackStageMax;
-      state.crackStageMax = stage;
-      playSe("crack");
+  while (state.ringIndex < RINGS.length && sz >= RINGS[state.ringIndex]) {
+    const rz = RINGS[state.ringIndex];
+    const d = Math.hypot(state.x - pathX3(rz), state.y - pathY3(rz));
+    if (d <= GAME.RING_R) {
+      state.ringsPassed++;
+      state.effects.push({ type: "pass", z: rz, t0: performance.now() });
+    } else {
+      state.damage = Math.min(GAME.DAMAGE_MAX, state.damage + GAME.RING_DMG);
+      state.missTimer = 1.4;
+      state.effects.push({ type: "miss", z: rz, t0: performance.now() });
+      // ヒビの段階が進んだらカウント
+      const stage = Math.floor(state.damage / GAME.CRACK_STEP);
+      if (stage > state.crackStageMax) {
+        state.crackCount += stage - state.crackStageMax;
+        state.crackStageMax = stage;
+        playSe("crack");
+      }
     }
+    state.ringIndex++;
   }
+  if (state.missTimer > 0) state.missTimer -= dt;
 
   /* --- 警告表示 --- */
   const warn = $("game-warning");
   if (state.lost) {
     warn.textContent = "観音さまを見失いました…… カメラに見せてあげてください";
     warn.style.display = "block";
-  } else if (offPath) {
-    warn.textContent = "道から外れています……!";
+  } else if (state.missTimer > 0) {
+    warn.textContent = "輪から外れてしまった……!";
     warn.style.display = "block";
   } else {
     warn.style.display = "none";
@@ -1163,14 +1221,13 @@ function updateGame(dt) {
     return;
   }
 
-  /* --- 道中イベント --- */
-  const progress = state.dist / GAME.GOAL_DIST;
-  if (!state.event1Done && progress >= GAME.EVENT1_AT) {
+  /* --- 道中イベント(道中に立つ守護神の目の前まで来たら発動) --- */
+  if (!state.event1Done && sz >= GAME.EVENT1_Z - GAME.EVENT_NEAR) {
     state.event1Done = true;
     triggerEvent(NOVEL_EVENT1, IMAGE_PATHS.eventFujin);
     return;
   }
-  if (!state.event2Done && progress >= GAME.EVENT2_AT) {
+  if (!state.event2Done && sz >= GAME.EVENT2_Z - GAME.EVENT_NEAR) {
     state.event2Done = true;
     triggerEvent(NOVEL_EVENT2, IMAGE_PATHS.event28);
     return;
@@ -1233,7 +1290,7 @@ function renderGame() {
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
   }
 
-  /* 奥から手前へ描く要素(柱・梁・灯り・千体観音)を集めて深度順に描画 */
+  /* 奥から手前へ描く要素(柱・千体観音・輪・守護神)を集めて深度順に描画 */
   const items = [];
   for (let z = Math.ceil((camZ + 1.5) / VIEW.PILLAR_GAP) * VIEW.PILLAR_GAP;
        z < camZ + VIEW.VIEW_DIST; z += VIEW.PILLAR_GAP) {
@@ -1245,12 +1302,57 @@ function renderGame() {
       items.push({ z, kind: "kannon" });
     }
   }
+  /* くぐる輪(まだ通過していないもの) */
+  for (let i = state.ringIndex; i < RINGS.length; i++) {
+    const rz = RINGS[i];
+    if (rz >= camZ + VIEW.VIEW_DIST) break;
+    if (rz > camZ + 0.5) items.push({ z: rz, kind: "ring", idx: i });
+  }
+  /* 道中に立つ守護神たち */
+  if (sprites.spFujin && sprites.spRaijin && GAME.EVENT1_Z > camZ + 0.3 && GAME.EVENT1_Z < camZ + VIEW.VIEW_DIST) {
+    items.push({ z: GAME.EVENT1_Z, kind: "guard1" });
+  }
+  if (sprites.spBushu && GAME.EVENT2_Z > camZ + 0.3 && GAME.EVENT2_Z < camZ + VIEW.VIEW_DIST) {
+    items.push({ z: GAME.EVENT2_Z, kind: "guard2" });
+  }
   items.sort((p, q) => q.z - p.z);   // 遠い順
 
   for (const it of items) {
     const f = 1 - fogAt(it.z - camZ);
     if (f <= 0.02) continue;
-    if (it.kind === "kannon") {
+    if (it.kind === "ring") {
+      /* くぐる輪(次の輪はやや強く光り、脈打つ) */
+      const p = proj(pathX3(it.z), pathY3(it.z), it.z, camX, camZ);
+      const isNext = it.idx === state.ringIndex;
+      const pulse = isNext ? 1 + 0.05 * Math.sin(nowT * 5) : 1;
+      const r = GAME.RING_R * p.s * pulse;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = `rgba(255,214,120,${(isNext ? 0.34 : 0.16) * f})`;
+      ctx.lineWidth = Math.max(3, r * 0.22);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = `rgba(255,232,170,${(isNext ? 0.9 : 0.5) * f})`;
+      ctx.lineWidth = Math.max(1.5, r * 0.05);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    } else if (it.kind === "guard1") {
+      /* 風神(左)と雷神(右) */
+      for (const [sp, gx] of [[sprites.spFujin, -2.0], [sprites.spRaijin, 2.0]]) {
+        const base = proj(gx, 0, it.z, camX, camZ);
+        const ph = 2.3 * base.s, pw = ph * sp.width / sp.height;
+        ctx.globalAlpha = f;
+        ctx.drawImage(sp, base.x - pw / 2, base.y - ph, pw, ph);
+      }
+      ctx.globalAlpha = 1;
+    } else if (it.kind === "guard2") {
+      /* 二十八部衆(最前列に横並び) */
+      const sp = sprites.spBushu;
+      const base = proj(0, 0, it.z, camX, camZ);
+      const ph = 2.5 * base.s, pw = ph * sp.width / sp.height;
+      ctx.globalAlpha = f;
+      ctx.drawImage(sp, base.x - pw / 2, base.y - ph, pw, ph);
+      ctx.globalAlpha = 1;
+    } else if (it.kind === "kannon") {
       /* 千体観音の列(左右) */
       const sp = sprites.kannonBg;
       const h = 1.7;   // 像の高さ(m)
@@ -1311,34 +1413,24 @@ function renderGame() {
     }
   }
 
-  /* 光の道(3Dリボン。奥から手前へ、加算合成で光らせる) */
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  let prev = null;
-  for (let z = camZ + VIEW.VIEW_DIST; z >= camZ + 1.4; z -= 0.7) {
-    const p = proj(pathX3(z), pathY3(z), z, camX, camZ);
-    if (prev) {
-      const f = 1 - fogAt(z - camZ);
-      if (f > 0.02) {
-        // 手前ほど太くなりすぎないよう幅に上限(巨大な光の輪を防ぐ)
-        const wBand = Math.min(150, GAME.PATH_R * p.s * 2);
-        /* 淡い帯 */
-        ctx.strokeStyle = `rgba(255,214,120,${0.08 * f})`;
-        ctx.lineWidth = wBand;
-        ctx.lineCap = "round";
-        ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(p.x, p.y); ctx.stroke();
-        /* 芯の光 */
-        ctx.strokeStyle = `rgba(255,230,160,${0.45 * f})`;
-        ctx.lineWidth = Math.max(1.5, Math.min(14, wBand * 0.09));
-        ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(p.x, p.y); ctx.stroke();
-      }
-    }
-    prev = p;
-  }
-  ctx.restore();
-
   /* 運搬中の観音さま(カメラの少し先を浮かんで進む) */
   drawStatue(ctx, camX, camZ, nowT);
+
+  /* 輪くぐりの成功・失敗エフェクト */
+  const nowMs = performance.now();
+  state.effects = state.effects.filter((e) => nowMs - e.t0 < 700);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const e of state.effects) {
+    const t = (nowMs - e.t0) / 700;
+    const p = proj(pathX3(e.z), pathY3(e.z), e.z, camX, camZ);
+    const r = GAME.RING_R * p.s * (1 + t * 0.9);
+    const col = e.type === "pass" ? "255,232,170" : "255,110,80";
+    ctx.strokeStyle = `rgba(${col},${0.8 * (1 - t)})`;
+    ctx.lineWidth = Math.max(2, r * 0.08);
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.restore();
 
   /* HUD */
   drawHud(ctx);
@@ -1438,6 +1530,10 @@ function drawHud(ctx) {
   ctx.strokeStyle = "rgba(217,180,91,0.5)";
   ctx.strokeRect(24.5, 40.5, 119, 11);
 
+  /* くぐった輪の数 */
+  ctx.fillStyle = "#f0e6d2";
+  ctx.fillText(`輪 ${state.ringsPassed} / ${RINGS.length}`, 24, 78);
+
   /* タイム */
   ctx.textAlign = "right";
   ctx.fillStyle = "#f0e6d2";
@@ -1473,6 +1569,7 @@ function startEnding() {
 
 function showResult() {
   $("result-time").textContent = formatTime(state.playTime);
+  $("result-rings").textContent = `${state.ringsPassed} / ${RINGS.length}`;
   $("result-cracks").textContent = `${state.crackCount} 本`;
   $("result-praise").textContent =
     state.crackCount === 0 ? "見事な奉納!" :
