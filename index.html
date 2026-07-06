@@ -456,9 +456,13 @@ const BGM_PATHS = {
 };
 // 効果音・ボイス
 const SE_PATHS = {
-  crack:      "",                             // ヒビが入った時
-  goal:       "",                             // 奉納の瞬間
-  emperorUmu: "audio/voice_emperor_umu.mp3",  // 上皇「ううむ……」(頭痛のセリフ)
+  crack:         "",                                // ヒビが入った時
+  goal:          "",                                // 奉納の瞬間
+  emperorUmu:    "audio/voice_emperor_umu.mp3",     // 上皇「ううむ……」
+  emperorNanto:  "audio/voice_emperor_nanto.mp3",   // 上皇「なんと……!」
+  emperorTanomu: "audio/voice_emperor_tanomu.mp3",  // 上皇「頼む。……」
+  oracleDokuro:  "audio/voice_oracle_dokuro.mp3",   // お告げ「蓮華坊の髑髏は……」
+  oracleShotai:  "audio/voice_oracle_shotai.mp3",   // お告げ「それが頭痛の正体じゃ」
 };
 
 /* ================================================================
@@ -529,14 +533,14 @@ const NOVEL_INTRO = [
   { name: "後白河上皇", face: "pain", se: "emperorUmu", text: "ううむ……今日も頭が割れるように痛い……。薬も、祈祷も、なにも効かぬ……" },
   "そんなある夜のこと。眠っている上皇さまの夢の中に、不思議な声が聞こえてきます。",
   { name: "夢のお告げ", text: "そなたの前世は、熊野の僧・蓮華坊(れんげぼう)じゃ。" },
-  { name: "夢のお告げ", text: "蓮華坊の髑髏(されこうべ)は、いまも川の底に沈んでおる。髑髏からは柳の木が生えていてな——風が吹くたび、柳が揺れて、髑髏にこつん、こつんと当たるのじゃ。" },
-  { name: "夢のお告げ", text: "それが、そなたの頭痛の正体じゃ。" },
-  { name: "後白河上皇", text: "なんと……! では、その髑髏を引き上げて、ねんごろに供養せねば……!" },
+  { name: "夢のお告げ", se: "oracleDokuro", text: "蓮華坊の髑髏(されこうべ)は、いまも川の底に沈んでおる。髑髏からは柳の木が生えていてな——風が吹くたび、柳が揺れて、髑髏にこつん、こつんと当たるのじゃ。" },
+  { name: "夢のお告げ", se: "oracleShotai", text: "それが、そなたの頭痛の正体じゃ。" },
+  { name: "後白河上皇", se: "emperorNanto", text: "なんと……! では、その髑髏を引き上げて、ねんごろに供養せねば……!" },
   "お告げのとおり、上皇さまは平清盛(たいらのきよもり)に命じます。川から引き上げた髑髏は、観音像の中へ。柳の木は、お堂を支える棟木(むなぎ)に。",
   "そうして建てられたのが——千体の観音が立ち並ぶ、南北120メートルの長いお堂。のちの「三十三間堂」です。",
   "名前の「三十三」は、観音さまが33の姿に変化して人々を救う、という教えから。千体の観音は、「一人でも多く、一つでも多くの方法で救いたい」——そんな祈りのかたちなんですね。",
   "……そして今。あなたたちの手で、千一体目の観音さまが生まれました。",
-  { name: "後白河上皇", text: "頼む。その観音さまを、お堂のいちばん奥へ運び、奉納してほしい。長い長い、120メートルの道のりじゃ。……どうか、落とさぬようにな。" },
+  { name: "後白河上皇", se: "emperorTanomu", text: "頼む。その観音さまを、お堂のいちばん奥へ運び、奉納してほしい。長い長い、120メートルの道のりじゃ。……どうか、落とさぬようにな。" },
 ];
 
 const NOVEL_EVENT1 = [
@@ -608,6 +612,17 @@ function playSe(key) {
   const se = new Audio(src);
   se.volume = 0.8;
   se.play().catch(() => {});
+}
+
+// セリフボイス: 同時に1つだけ再生(次の行に進んだら前のボイスを止める)
+let voiceAudio = null;
+function playVoice(key) {
+  if (voiceAudio) { voiceAudio.pause(); voiceAudio = null; }
+  const src = (key && SE_PATHS[key]) || "";
+  if (!src) return;
+  voiceAudio = new Audio(src);
+  voiceAudio.volume = 0.9;
+  voiceAudio.play().catch(() => {});
 }
 
 // 自動再生制限対策: ページ読み込み直後はBGMがブロックされるため、
@@ -717,14 +732,15 @@ const novel = {
     if (IMAGE_PATHS.emperor && IMAGE_PATHS.emperorPain) {
       $("emperor-img").src = face === "pain" ? IMAGE_PATHS.emperorPain : IMAGE_PATHS.emperor;
     }
-    // ボイス付きのセリフ行は表示と同時に再生
-    if (typeof line === "object" && line.se) playSe(line.se);
+    // ボイス付きのセリフ行は表示と同時に再生(次の行に進むと前のボイスは停止)
+    playVoice(typeof line === "object" ? line.se : "");
   },
   advance() {
     if (!this.active) return;
     this.index++;
     if (this.index >= this.lines.length) {
       this.active = false;
+      playVoice("");   // ノベル終了時にボイスを止める
       $("novel").classList.remove("active");
       if (this.onDone) this.onDone();
     } else {
