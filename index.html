@@ -551,6 +551,17 @@ const PREP_NOTICE = {
   trivia: "粘土が白っぽいときは、カメラに映る背景を濃い色にしておくと見つけやすくなりますよ。次の画面で、観音さまの色をカメラに教えてあげてくださいね。",
 };
 
+// 粘土制作の前振り: 仏師の工房に招かれる場面
+const NOVEL_PROLOGUE = [
+  "――ここは、都のはずれにある小さな仏師の工房。木の香りと、のみの音。",
+  { name: "仏師", text: "おお、来た来た。お待ちしておりましたよ。……ようこそ、わたしの工房へ。" },
+  { name: "仏師", text: "わたしはこの都で仏さまを彫っております、しがない仏師。今日はあなたたちに、大事な大事な仕事を頼みたいのです。" },
+  { name: "仏師", text: "実はいま、あるお方のために観音さまを一体、お作りすることになりましてな。……ところがご覧のとおり、わたしの手はもういっぱい。" },
+  { name: "仏師", text: "そこで——あなたたちの出番、というわけです。" },
+  { name: "仏師", text: "難しく考えなくて大丈夫。目の前の粘土を、心を込めてかたちにするだけ。手順は、わたしがひとつずつご案内しますからね。" },
+  { name: "仏師", text: "さあ、袖をまくって。——あなたたちだけの観音さまづくり、はじめましょうか。" },
+];
+
 // 行は文字列(地の文)または {name, text, face, se}(セリフ。名前プレート・表情差分・ボイス)
 const NOVEL_INTRO = [
   "時は、平安時代の終わりごろ。都で最も力を持っていた人物——それが、後白河上皇(ごしらかわじょうこう)です。",
@@ -740,7 +751,13 @@ const novel = {
   lines: [], index: 0, onDone: null, active: false,
   show(lines, opts, onDone) {
     this.lines = lines; this.index = 0; this.onDone = onDone; this.active = true;
-    $("novel-portrait").classList.toggle("show", !!(opts && opts.portrait));
+    // 立ち絵: portrait に IMAGE_PATHS のキー("emperor" / "busshi" など)を指定
+    this.portraitKey = (opts && opts.portrait === true) ? "emperor" : (opts && opts.portrait) || "";
+    $("novel-portrait").classList.toggle("show", !!this.portraitKey);
+    if (this.portraitKey && IMAGE_PATHS[this.portraitKey]) {
+      $("emperor-img").src = IMAGE_PATHS[this.portraitKey];
+      $("novel-portrait").classList.add("has-image");
+    }
     // イベント背景(opts.bg にパスが指定された時だけ表示)
     const bg = $("novel-bg");
     if (opts && opts.bg) {
@@ -760,9 +777,9 @@ const novel = {
     $("novel-name").textContent = name;
     $("novel-name").style.display = name ? "inline-block" : "none";
     $("novel-text").textContent = typeof line === "object" ? line.text : line;
-    $("novel-portrait").classList.toggle("speaking", name === "後白河上皇");
-    // 表情差分: face:"pain" の行だけ頭痛の立ち絵に
-    if (IMAGE_PATHS.emperor && IMAGE_PATHS.emperorPain) {
+    $("novel-portrait").classList.toggle("speaking", name === "後白河上皇" || name === "仏師");
+    // 表情差分: 上皇の立ち絵のとき、face:"pain" の行だけ頭痛の立ち絵に
+    if (this.portraitKey === "emperor" && IMAGE_PATHS.emperor && IMAGE_PATHS.emperorPain) {
       $("emperor-img").src = face === "pain" ? IMAGE_PATHS.emperorPain : IMAGE_PATHS.emperor;
     }
     // ボイス付きのセリフ行は表示と同時に再生(次の行に進むと前のボイスは停止)
@@ -786,6 +803,18 @@ $("novel").addEventListener("click", () => novel.advance());
 /* ================================================================
    フェーズ1: 粘土制作パート
    ================================================================ */
+// 前振り: 仏師の工房に招かれるノベル → 粘土制作へ
+function startPrologue() {
+  state.scene = "prologue";
+  showScreen("craft");
+  document.querySelector(".craft-card").style.visibility = "hidden";
+  setBgm("craft");
+  novel.show(NOVEL_PROLOGUE, { portrait: "busshi" }, () => {
+    document.querySelector(".craft-card").style.visibility = "visible";
+    startCraft();
+  });
+}
+
 function startCraft() {
   state.scene = "craft";
   state.craftIndex = 0;
@@ -822,7 +851,7 @@ function startNovelIntro() {
   showScreen("wish");            // 背後の画面(ノベルの下敷き)
   $("screen-wish").style.visibility = "hidden";
   setBgm("novel");
-  novel.show(NOVEL_INTRO, { portrait: true }, () => {
+  novel.show(NOVEL_INTRO, { portrait: "emperor" }, () => {
     $("screen-wish").style.visibility = "visible";
     state.scene = "wish";
     $("wish-input").focus();
@@ -1289,6 +1318,19 @@ function renderGame(dt) {
   ctx.fillStyle = floor;
   ctx.fillRect(0, VIEW.CY, W, H - VIEW.CY);
 
+  /* 外陣の壁(千体観音の列の背後を締める暗い面) */
+  for (const side of [-1, 1]) {
+    const nB = proj(side * 5.3, 0, camZ + 1.0, camX, camZ);
+    const nT = proj(side * 5.3, VIEW.CEIL_H, camZ + 1.0, camX, camZ);
+    const fB = proj(side * 5.3, 0, camZ + VIEW.VIEW_DIST, camX, camZ);
+    const fT = proj(side * 5.3, VIEW.CEIL_H, camZ + VIEW.VIEW_DIST, camX, camZ);
+    ctx.fillStyle = "rgba(14,9,5,0.55)";
+    ctx.beginPath();
+    ctx.moveTo(nB.x, nB.y); ctx.lineTo(nT.x, nT.y);
+    ctx.lineTo(fT.x, fT.y); ctx.lineTo(fB.x, fB.y);
+    ctx.closePath(); ctx.fill();
+  }
+
   /* 床板の目地(奥行き方向の線は消失点へ収束) */
   ctx.lineWidth = 1;
   for (let xi = -3.5; xi <= 3.5; xi += 1) {
@@ -1305,6 +1347,29 @@ function renderGame(dt) {
     const b = proj(3.6, 0, z, camX, camZ);
     ctx.strokeStyle = `rgba(217,180,91,${0.06 * f})`;
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+
+  /* 中央の敷道(緋毛氈)。金の縁取り付き */
+  {
+    const l1 = proj(-0.95, 0.005, camZ + 1.0, camX, camZ);
+    const r1 = proj(0.95, 0.005, camZ + 1.0, camX, camZ);
+    const l2 = proj(-0.95, 0.005, camZ + VIEW.VIEW_DIST, camX, camZ);
+    const r2 = proj(0.95, 0.005, camZ + VIEW.VIEW_DIST, camX, camZ);
+    const cg = ctx.createLinearGradient(0, l2.y, 0, l1.y);
+    cg.addColorStop(0, "rgba(90,22,22,0)");
+    cg.addColorStop(0.45, "rgba(104,26,26,0.45)");
+    cg.addColorStop(1, "rgba(122,31,31,0.7)");
+    ctx.fillStyle = cg;
+    ctx.beginPath();
+    ctx.moveTo(l1.x, l1.y); ctx.lineTo(r1.x, r1.y);
+    ctx.lineTo(r2.x, r2.y); ctx.lineTo(l2.x, l2.y);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "rgba(217,180,91,0.3)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(l1.x, l1.y); ctx.lineTo(l2.x, l2.y);
+    ctx.moveTo(r1.x, r1.y); ctx.lineTo(r2.x, r2.y);
+    ctx.stroke();
   }
 
   /* 壁沿いの長押(なげし)・天井の桁: 消失点へ収束する水平材 */
@@ -1353,6 +1418,11 @@ function renderGame(dt) {
     if (rz >= camZ + VIEW.VIEW_DIST) break;
     if (rz > camZ + 0.5) items.push({ z: rz, kind: "ring", idx: i });
   }
+  /* 吊り灯籠(柱と柱の中間に、左右一対) */
+  for (let z = Math.ceil((camZ + 1.5) / VIEW.PILLAR_GAP) * VIEW.PILLAR_GAP + VIEW.PILLAR_GAP / 2;
+       z < camZ + VIEW.VIEW_DIST; z += VIEW.PILLAR_GAP) {
+    items.push({ z, kind: "hangLantern" });
+  }
   /* 道中に立つ守護神たち */
   if (sprites.spFujin && sprites.spRaijin && GAME.EVENT1_Z > camZ + 0.3 && GAME.EVENT1_Z < camZ + VIEW.VIEW_DIST) {
     items.push({ z: GAME.EVENT1_Z, kind: "guard1" });
@@ -1380,6 +1450,37 @@ function renderGame(dt) {
       ctx.lineWidth = Math.max(1.5, r * 0.05);
       ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.stroke();
       ctx.restore();
+    } else if (it.kind === "hangLantern") {
+      /* 吊り灯籠(鎖で吊られ、かすかに揺れる) */
+      for (const side of [-1, 1]) {
+        const sway = 0.05 * Math.sin(nowT * 1.3 + it.z * 0.7 + side);
+        const lx = side * 1.75 + sway;
+        const top = proj(lx, VIEW.CEIL_H, it.z, camX, camZ);
+        const bod = proj(lx, 2.62, it.z, camX, camZ);
+        const bw = 0.17 * bod.s, bh = 0.3 * bod.s;
+        /* 鎖 */
+        ctx.strokeStyle = `rgba(60,42,24,${f})`;
+        ctx.lineWidth = Math.max(1, 0.015 * bod.s);
+        ctx.beginPath(); ctx.moveTo(top.x, top.y); ctx.lineTo(bod.x, bod.y - bh / 2); ctx.stroke();
+        /* 灯籠本体と灯り */
+        const flick2 = 0.8 + 0.2 * Math.sin(nowT * 5.7 + it.z * 2.3 + side);
+        const gl2 = ctx.createRadialGradient(bod.x, bod.y, 1, bod.x, bod.y, bh * 1.7);
+        gl2.addColorStop(0, `rgba(255,205,115,${0.4 * f * flick2})`);
+        gl2.addColorStop(1, "rgba(255,205,115,0)");
+        ctx.fillStyle = gl2;
+        ctx.beginPath(); ctx.arc(bod.x, bod.y, bh * 1.7, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = `rgba(255,214,130,${0.85 * f * flick2})`;
+        ctx.beginPath();
+        ctx.moveTo(bod.x, bod.y - bh * 0.62);
+        ctx.lineTo(bod.x + bw / 2, bod.y - bh * 0.3);
+        ctx.lineTo(bod.x + bw * 0.4, bod.y + bh * 0.45);
+        ctx.lineTo(bod.x - bw * 0.4, bod.y + bh * 0.45);
+        ctx.lineTo(bod.x - bw / 2, bod.y - bh * 0.3);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = `rgba(40,26,14,${f})`;
+        ctx.lineWidth = Math.max(0.8, 0.012 * bod.s);
+        ctx.stroke();
+      }
     } else if (it.kind === "guard1") {
       /* 風神(左)と雷神(右) */
       for (const [sp, gx] of [[sprites.spFujin, -2.0], [sprites.spRaijin, 2.0]]) {
@@ -1407,6 +1508,13 @@ function renderGame(dt) {
         const pw = ph * sp.width / sp.height;
         ctx.globalAlpha = 0.62 * f;
         ctx.drawImage(sp, base.x - pw / 2, base.y - ph, pw, ph);
+        /* 磨かれた床への映り込み */
+        ctx.globalAlpha = 0.13 * f;
+        ctx.save();
+        ctx.translate(base.x, base.y);
+        ctx.scale(1, -0.75);
+        ctx.drawImage(sp, -pw / 2, -ph, pw, ph);
+        ctx.restore();
       }
       ctx.globalAlpha = 1;
     } else {
@@ -1689,11 +1797,11 @@ $("btn-back-title").addEventListener("click", () => {
    ================================================================ */
 $("btn-start-camera").addEventListener("click", () => {
   state.kbMode = false;
-  startCraft();
+  startPrologue();
 });
 $("btn-start-keyboard").addEventListener("click", () => {
   state.kbMode = true;
-  startCraft();
+  startPrologue();
 });
 
 /* ================================================================
