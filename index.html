@@ -28,8 +28,10 @@
     検出が不安定になります。白色光を推奨。
   - 背景: カメラに映る背景に、粘土と似た色の物や服があると誤検出します。
     プレイヤーの服・壁・ポスター等を事前に確認してください。
-  - 距離: カメラから粘土まで 50cm〜1m 程度。近すぎると画面外に出やすく、
-    遠すぎると検出画素数が足りずロストしやすくなります。
+  - 距離: ふだんの持ち方はカメラから 50cm〜1m 程度。運搬パートでは
+    「カメラに近づけると進む・戻すと止まる」ため、前後に 20〜30cm ほど
+    動かせる余裕を持って構えてください。遠すぎると検出画素数が足りず
+    ロストしやすくなります。
   - 照明が変わったら: フェーズ3冒頭のキャリブレーション画面で色を登録し直し、
     「色の許容しきい値」スライダーで調整してください。
 
@@ -156,7 +158,8 @@
     background: linear-gradient(180deg, rgba(10,6,3,.18) 0%, rgba(10,6,3,.28) 60%, rgba(10,6,3,.6) 100%);
   }
   #novel .portrait {
-    position: absolute; left: 60px; bottom: 175px; width: 260px; height: 330px;
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: 175px; width: 300px; height: 340px;
     display: none; align-items: flex-end; justify-content: center;
   }
   #novel .portrait.show { display: flex; }
@@ -505,6 +508,9 @@ const GAME = {
   EVENT2_Z: 102,          // 二十八部衆が立っている位置(m)
   EVENT_NEAR: 2.5,        // 何m手前まで近づいたらエピソード開始か
   KB_MOVE: 1.9,           // キーボードモード: 上下左右の移動速度(m/s)
+  CAM_BASE_FRAMES: 45,    // 開始直後、「ふだんの持ち方」の大きさを覚えるフレーム数
+  CAM_GO_START: 1.35,     // 見かけの大きさがこの倍率を超えたら進み始める
+  CAM_GO_FULL: 2.4,       // この倍率で最高速(カメラへぐっと近づけた状態)
   X_RANGE: 2.2,           // 観音さまの左右可動域(±m)
   Y_MIN: 0.3, Y_MAX: 2.3, // 観音さまの上下可動域(m)
   STATUE_AHEAD: 2.1,      // 観音さまはカメラの何m先を進むか
@@ -619,6 +625,9 @@ const state = {
   ringIndex: 0,           // 次にくぐる輪の番号
   ringsPassed: 0,         // くぐれた輪の数
   missTimer: 0,           // 輪を外した直後の警告表示タイマー(秒)
+  baseCount: 0,           // カメラ前進用: ふだんの持ち方での検出画素数(基準)
+  countEMA: 0,            // カメラ前進用: 検出画素数の移動平均
+  baseFrames: 0,          // 基準を覚えるのに使ったフレーム数
   effects: [],            // 輪くぐり成功などの一時エフェクト
   damage: 0,              // ダメージゲージ(0-100)
   crackCount: 0,          // 累計ヒビ数(リザルト用)
@@ -1179,6 +1188,7 @@ function startGame() {
   state.x = pathX3(GAME.STATUE_AHEAD);
   state.y = pathY3(GAME.STATUE_AHEAD);
   state.ringIndex = 0; state.ringsPassed = 0;
+  state.baseCount = 0; state.countEMA = 0; state.baseFrames = 0;
   sparkles.length = 0;
   initMotes();
   state.missTimer = 0; state.effects = [];
@@ -1191,7 +1201,7 @@ function startGame() {
   camOverlay.style.display = state.kbMode ? "none" : "block";
   $("intro-controls").innerHTML = state.kbMode
     ? "W / S:上下 A / D:左右 ↑:奥へ進む ↓:止まる ← / →:きらめきを散らす"
-    : "粘土係:観音さまを手に持って、カメラの前で上下・左右にそっと動かす<br>キーボード係:↑キーで奥へ進む・↓で止まる。← →で祝いのきらめき(1人のときは左手に観音さま・右手にキーボード)";
+    : "ふだんの持ち方で構えて「お運びを始める」を押してください。<br><b>カメラに近づけると進み、手元に戻すと止まります。</b>上下・左右に動かして輪をくぐりましょう。<br>(キーボードは補助: ↑↓でも進む・止まる、← →で祝いのきらめき)";
   $("overlay-intro").classList.add("active");
   $("overlay-rest").classList.remove("active");
 }
@@ -1255,7 +1265,10 @@ function updateGame(dt) {
   state.x = Math.max(-GAME.X_RANGE, Math.min(GAME.X_RANGE, state.x));
   state.y = Math.max(GAME.Y_MIN, Math.min(GAME.Y_MAX, state.y));
 
-  /* --- 前進速度(↑で進む・↓で止まる) --- */
+  /* --- 前進速度 ---
+     カメラモード: 粘土をカメラに近づけると進み、ふだんの持ち方に戻すと止まる。
+     (検出画素数=見かけの大きさを、開始直後に覚えた基準と比べて距離を推定)
+     ↑↓キーは両モード共通の補助として残す。 */
   if (state.lost) {
     // ロスト中は安全のため停止方向へ
     state.speed = Math.max(0, state.speed - GAME.BRAKE * dt);
@@ -1263,6 +1276,24 @@ function updateGame(dt) {
     state.speed = Math.min(GAME.MAX_SPEED, state.speed + GAME.ACCEL * dt);
   } else if (state.keys["ArrowDown"]) {
     state.speed = Math.max(0, state.speed - GAME.BRAKE * dt);
+  } else if (!state.kbMode) {
+    state.countEMA += (cam.lastCount - state.countEMA) * 0.2;
+    if (state.baseFrames < GAME.CAM_BASE_FRAMES) {
+      // 開始直後: 「ふだんの持ち方」での見かけの大きさを基準として記録
+      state.baseFrames++;
+      state.baseCount += (state.countEMA - state.baseCount) * 0.15;
+      state.speed = Math.max(0, state.speed - GAME.FRICTION * dt);
+    } else {
+      const ratio = state.countEMA / Math.max(1, state.baseCount);
+      const t = Math.max(0, Math.min(1,
+        (ratio - GAME.CAM_GO_START) / (GAME.CAM_GO_FULL - GAME.CAM_GO_START)));
+      const target = t * GAME.MAX_SPEED;
+      state.speed += (target - state.speed) * Math.min(1, 5 * dt);
+      // ふだんの持ち方に戻している間は、基準をゆっくり追従(姿勢のドリフト対策)
+      if (ratio > 0.7 && ratio < 1.2) {
+        state.baseCount += (state.countEMA - state.baseCount) * 0.003;
+      }
+    }
   } else {
     state.speed = Math.max(0, state.speed - GAME.FRICTION * dt);
   }
@@ -1785,6 +1816,16 @@ function drawHud(ctx) {
   /* くぐった輪の数 */
   ctx.fillStyle = "#f0e6d2";
   ctx.fillText(`輪 ${state.ringsPassed} / ${RINGS.length}`, 24, 78);
+
+  /* 進みゲージ(カメラに近づけるほど伸びる) */
+  ctx.fillStyle = "#f0e6d2";
+  ctx.fillText("進み", 24, 104);
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(60, 96, 84, 9);
+  ctx.fillStyle = "rgba(217,180,91,0.85)";
+  ctx.fillRect(60, 96, 84 * (state.speed / GAME.MAX_SPEED), 9);
+  ctx.strokeStyle = "rgba(217,180,91,0.5)";
+  ctx.strokeRect(60.5, 96.5, 83, 8);
 
   /* タイム */
   ctx.textAlign = "right";
