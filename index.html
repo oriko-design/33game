@@ -19,9 +19,11 @@
 ■ カメラ検出の精度に影響する環境要因(展示前に必ず確認)
   - 検出方式: 粘土(観音さま)そのものの色を1点追跡し、上下・左右の位置を読み取ります。
     傾きの検出はありません。運搬パートは擬似3D表示で、お堂の奥へ進んでいきます。
-  - 粘土の色: 白い紙粘土のままでも動作します(白っぽい色は明るさベースで判定)が、
-    白い壁・白い服の前では誤検出しやすくなります。背景に濃い色の布を垂らすか、
-    粘土に色を付けると安定します。
+  - 粘土の色: 白や薄い黄土色など彩度の低い粘土でも動作します(色相・彩度・明るさの
+    総合スコアで判定し、薄い色は自動的に彩度・明るさ重視になります)。
+    ただし肌・木の机・ベージュの壁とは色が近いため、背景に濃い色や青系の布を
+    垂らすと大きく安定します。キャリブレーションでは明るい面と影の面など
+    2〜3か所をクリックして複数サンプルを登録してください。
   - 照明: 明るく均一な照明が理想。逆光・強い西日・色付き照明(暖色電球のみ等)は
     検出が不安定になります。白色光を推奨。
   - 背景: カメラに映る背景に、粘土と似た色の物や服があると誤検出します。
@@ -341,14 +343,14 @@
     <div class="calib-wrap">
       <canvas id="calib-canvas" width="480" height="360"></canvas>
       <div class="calib-panel">
-        <p>観音さまを手に持って、カメラに向けてください。下のボタンを押してから、<b>映像の中の観音さま(粘土)</b>をクリック。</p>
+        <p>観音さまを手に持って、カメラに向けてください。下のボタンを押してから、<b>映像の中の観音さま(粘土)</b>をクリック。<b>明るい面と影の面など、2〜3か所</b>クリックすると安定します。</p>
         <div class="pickrow">
           <div class="swatch" id="swatch-clay"></div>
           <button class="btn sub" id="btn-pick-clay">観音さま(粘土)の色を登録</button>
         </div>
         <p style="margin-top:14px;">色の許容しきい値:<span id="tol-value"></span></p>
         <input type="range" id="tol-slider" min="10" max="55" step="1">
-        <p class="calib-hint">○印が観音さまに安定して付けばOK。うまくいかないときは、しきい値を広げるか、背景に濃い色の布などを置いてみてください。</p>
+        <p class="calib-hint">金色に光る点=拾えている場所です。○印が観音さまに安定して付けばOK。粘土以外(手や机)が光るときはしきい値を狭く、粘土が光らないときは広く。背景に濃い色や青系の布を置くと安定します。</p>
         <p id="calib-status"></p>
         <button class="btn" id="btn-calib-done" disabled>準備完了 ― お堂へ</button>
       </div>
@@ -477,13 +479,11 @@ const DETECT = {
   PROC_W: 160,          // 解析用キャンバスの幅(小さいほど軽い)
   PROC_H: 120,          // 解析用キャンバスの高さ
   SCAN_STEP: 2,         // ピクセル走査の間引き(2 = 1つ飛ばし)
-  HUE_TOL_DEFAULT: 28,  // 色相の許容範囲(度)スライダー初期値
-  SAT_MIN: 0.22,        // これ未満の彩度は無彩色として無視(色付き粘土の判定時)
-  VAL_MIN: 0.18,        // これ未満の明度は暗すぎとして無視
-  SAT_TOL: 0.5,         // 登録色との彩度差の許容
-  ACHROMA_SAT: 0.3,     // 登録色の彩度がこれ未満なら「白っぽい粘土」モードで判定
+  HUE_TOL_DEFAULT: 28,  // 許容しきい値スライダーの初期値(28 ≒ 総合スコア1.0)
   SMOOTH: 0.35,         // スムージング係数(EMA。大きいほど追従が速い)
   MIN_PIXELS: 5,        // 検出画素がこれ未満ならロスト扱い
+  MAX_REFS: 5,          // 登録できる色サンプルの最大数
+  SEARCH_R: 34,         // 追跡中は前回位置からこの半径(解析px)を優先して探す
 };
 
 /* ================================================================
@@ -876,7 +876,9 @@ const cam = {
   procCtx: null,
   ready: false,
   hueTol: DETECT.HUE_TOL_DEFAULT,
-  refClay: null,        // 登録色 {h,s,v}
+  refs: [],             // 登録色サンプルの一覧 {h,s,v}(複数登録で照明ムラに強くなる)
+  lastCount: 0,         // 直近フレームの検出画素数(キャリブレーション表示用)
+  matchedPts: null,     // キャリブレーション画面用: マッチした画素の座標リスト
   // 検出結果(鏡像座標系 / 解析キャンバス基準)
   clay: { x: 0, y: 0, found: false, has: false },
 };
@@ -918,18 +920,24 @@ function rgb2hsv(r, g, b) {
   return [h, max === 0 ? 0 : d / max, max];
 }
 
-// 登録色とのマッチ判定(HSVベースで照明変化に強く)
-function matchColor(r, g, b, ref) {
+// 登録色とのマッチ判定
+// 色相・彩度・明るさの差を重み付きで総合スコア化する。
+// 彩度が低い色(白っぽい粘土・薄い黄土色など)は色相が当てにならないため、
+// 色相の重みを彩度に応じて自動的に下げ、彩度・明るさの近さで判定する。
+function matchColor(r, g, b) {
   const [h, s, v] = rgb2hsv(r, g, b);
-  if (ref.s < DETECT.ACHROMA_SAT) {
-    // 白っぽい粘土: 色相が当てにならないので「彩度が低く、明るさが近い」で判定
-    // しきい値スライダーは明るさの許容幅として効く(28 → 約±0.2)
-    return s < DETECT.ACHROMA_SAT + 0.1 && Math.abs(v - ref.v) < cam.hueTol / 140;
+  const limit = cam.hueTol / 28;   // スライダー28で総合スコア1.0まで許容
+  for (const ref of cam.refs) {
+    let dh = Math.abs(h - ref.h);
+    if (dh > 180) dh = 360 - dh;   // 色相は円環なので短い方の距離
+    const hueWeight = Math.min(1, Math.min(s, ref.s) / 0.35);
+    const score =
+      (dh / 60) * hueWeight +          // 色相差(60度でスコア1.0)
+      Math.abs(s - ref.s) * 2.2 +      // 彩度差
+      Math.abs(v - ref.v) * 1.6;       // 明るさ差
+    if (score < limit) return true;    // どれか1つのサンプルに近ければOK
   }
-  if (s < DETECT.SAT_MIN || v < DETECT.VAL_MIN) return false;
-  let dh = Math.abs(h - ref.h);
-  if (dh > 180) dh = 360 - dh;   // 色相は円環なので短い方の距離
-  return dh < cam.hueTol && Math.abs(s - ref.s) < DETECT.SAT_TOL;
+  return false;
 }
 
 // 現在のカメラフレームを鏡像で解析キャンバスへ描画
@@ -942,24 +950,39 @@ function grabFrame() {
   return ctx.getImageData(0, 0, DETECT.PROC_W, DETECT.PROC_H);
 }
 
-// 粘土の色を間引き走査で検出し、重心をスムージングして更新
-function detectMarkers() {
-  if (!cam.ready || !cam.refClay) return;
+// 粘土の色を間引き走査で検出し、重心をスムージングして更新。
+// 追跡中は前回位置の近傍にある画素を優先することで、
+// 肌や木の家具など「似た色」が画面内にあっても引っ張られにくくする。
+function detectMarkers(collectPts) {
+  if (!cam.ready || cam.refs.length === 0) return;
   const img = grabFrame();
   const data = img.data;
   const step = DETECT.SCAN_STEP;
-  let sx = 0, sy = 0, n = 0;
+  const m = cam.clay;
+  const r2 = DETECT.SEARCH_R * DETECT.SEARCH_R;
+  let gx = 0, gy = 0, gn = 0;   // 画面全体の重心
+  let lx = 0, ly = 0, ln = 0;   // 前回位置の近傍だけの重心
+  const pts = collectPts ? [] : null;
   for (let y = 0; y < DETECT.PROC_H; y += step) {
     for (let x = 0; x < DETECT.PROC_W; x += step) {
       const i = (y * DETECT.PROC_W + x) * 4;
-      if (matchColor(data[i], data[i + 1], data[i + 2], cam.refClay)) {
-        sx += x; sy += y; n++;
+      if (matchColor(data[i], data[i + 1], data[i + 2])) {
+        gx += x; gy += y; gn++;
+        if (m.has) {
+          const dx = x - m.x, dy = y - m.y;
+          if (dx * dx + dy * dy < r2) { lx += x; ly += y; ln++; }
+        }
+        if (pts) pts.push(x, y);
       }
     }
   }
-  const m = cam.clay;
+  if (pts) cam.matchedPts = pts;
+  cam.lastCount = gn;
+  // 近傍に十分な画素があればそちらを採用(追跡の継続)、なければ全体から探し直す
+  let cx, cy, n;
+  if (m.has && ln >= DETECT.MIN_PIXELS) { cx = lx / ln; cy = ly / ln; n = ln; }
+  else { cx = gx / (gn || 1); cy = gy / (gn || 1); n = gn; }
   if (n >= DETECT.MIN_PIXELS) {
-    const cx = sx / n, cy = sy / n;
     if (m.has) {
       // 移動平均(EMA)でジッターを抑える
       m.x += (cx - m.x) * DETECT.SMOOTH;
@@ -995,7 +1018,12 @@ $("tol-slider").addEventListener("input", (e) => {
   cam.hueTol = Number(e.target.value);
   $("tol-value").textContent = e.target.value;
 });
-$("btn-pick-clay").addEventListener("click", () => { picking = true; updateCalibStatus(); });
+$("btn-pick-clay").addEventListener("click", () => {
+  cam.refs = [];          // 登録をやり直し
+  cam.clay.has = false;
+  picking = true;
+  updateCalibStatus();
+});
 
 calibCanvas.addEventListener("click", (e) => {
   if (!picking || !cam.ready) return;
@@ -1015,37 +1043,56 @@ calibCanvas.addEventListener("click", (e) => {
     }
   }
   const [h, s, v] = rgb2hsv(sr / n, sg / n, sb / n);
-  cam.refClay = { h, s, v };
+  // クリックするたびにサンプルを追加(明るい面・影の面を両方登録できる)
+  cam.refs.push({ h, s, v });
+  if (cam.refs.length > DETECT.MAX_REFS) cam.refs.shift();
   cam.clay.has = false;   // スムージングを初期化
   $("swatch-clay").style.background = `rgb(${Math.round(sr/n)},${Math.round(sg/n)},${Math.round(sb/n)})`;
-  picking = false;
   updateCalibStatus();
 });
 
 function updateCalibStatus() {
   const st = $("calib-status");
-  if (picking) st.textContent = "映像の中の観音さま(粘土)をクリック!";
-  else if (!cam.refClay) st.textContent = "色をひとつ登録すると、出発できます";
-  else st.textContent = "登録OK。○印が観音さまに付いていれば、準備完了です";
-  $("btn-calib-done").disabled = !cam.refClay;
+  if (cam.refs.length === 0) {
+    st.textContent = picking ? "映像の中の観音さま(粘土)をクリック!" : "色をひとつ登録すると、出発できます";
+  } else {
+    st.textContent = `登録した色: ${cam.refs.length}個。明るい面・影の面など、2〜3か所登録すると安定します`;
+  }
+  $("btn-calib-done").disabled = cam.refs.length === 0;
 }
 $("btn-calib-done").addEventListener("click", () => startGame());
 
 // キャリブレーション画面の描画(毎フレーム)
 function renderCalib() {
   if (!cam.ready) return;
-  detectMarkers();
+  detectMarkers(true);   // マッチ画素の座標も収集する
   const w = calibCanvas.width, h = calibCanvas.height;
   calibCtx.save();
   calibCtx.scale(-1, 1);   // 鏡像表示
   calibCtx.drawImage(cam.video, -w, 0, w, h);
   calibCtx.restore();
+  // 検出できている画素を金色で可視化(どこを拾えているかが一目で分かる)
+  if (cam.matchedPts && cam.matchedPts.length) {
+    const sx = w / DETECT.PROC_W, sy = h / DETECT.PROC_H;
+    calibCtx.fillStyle = "rgba(255,214,110,0.45)";
+    for (let i = 0; i < cam.matchedPts.length; i += 2) {
+      calibCtx.fillRect(cam.matchedPts[i] * sx - 1.5, cam.matchedPts[i + 1] * sy - 1.5, 3, 3);
+    }
+  }
   drawMarkerRings(calibCtx, w, h);
+  // 検出画素数(少なすぎるとロストしやすい目安になる)
+  if (cam.refs.length) {
+    calibCtx.fillStyle = "rgba(0,0,0,0.55)";
+    calibCtx.fillRect(6, 6, 132, 24);
+    calibCtx.fillStyle = cam.lastCount >= DETECT.MIN_PIXELS ? "#ffd98a" : "#ff8a6a";
+    calibCtx.font = "13px sans-serif";
+    calibCtx.fillText(`検出: ${cam.lastCount} 画素`, 12, 23);
+  }
 }
 
 // 検出マーカーの○印を描く(解析座標 → 任意キャンバス座標)
 function drawMarkerRings(ctx, w, h) {
-  if (!cam.refClay || !cam.clay.found) return;
+  if (cam.refs.length === 0 || !cam.clay.found) return;
   const sx = w / DETECT.PROC_W, sy = h / DETECT.PROC_H;
   ctx.beginPath();
   ctx.arc(cam.clay.x * sx, cam.clay.y * sy, Math.max(10, w * 0.04), 0, Math.PI * 2);
