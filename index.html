@@ -159,7 +159,7 @@
   }
   #novel .portrait {
     position: absolute; left: 50%; transform: translateX(-50%);
-    bottom: 175px; width: 300px; height: 340px;
+    bottom: 120px; width: 300px; height: 360px; z-index: 1;
     display: none; align-items: flex-end; justify-content: center;
   }
   #novel .portrait.show { display: flex; }
@@ -178,7 +178,7 @@
   #novel .portrait.has-image .caption { display: none; } /* 立ち絵があれば名札は不要 */
   #novel .portrait .caption { position: absolute; bottom: -26px; width: 100%; text-align: center; font-size: 12px; color: var(--gold-dim); letter-spacing: .2em; }
   #novel .textbox {
-    position: absolute; left: 4%; right: 4%; bottom: 26px; min-height: 128px;
+    position: absolute; left: 4%; right: 4%; bottom: 26px; min-height: 128px; z-index: 2;
     background: linear-gradient(180deg, rgba(30,22,14,.96), rgba(18,13,8,.96));
     border: 1px solid var(--gold-dim); border-radius: 6px;
     padding: 22px 34px 30px; font-size: 17px; line-height: 2.1;
